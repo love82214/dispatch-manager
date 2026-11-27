@@ -134,8 +134,10 @@ table { border-collapse: collapse; width: 100%; font-size: .875rem; white-space:
 th, td { padding: .5rem; border-bottom: 1px solid var(--line); text-align: end; }
 th:first-child, td:first-child { text-align: start; }
 tfoot { font-weight: 700; }
-.history-item { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: .35rem; }
-.history-item > :first-child { text-align: start; }
+.history-item { display: grid; gap: .35rem; padding-block-end: .5rem; border-bottom: 1px solid var(--line); }
+.history-date { text-align: start; }
+.history-actions { justify-content: flex-end; }
+.history-actions label { display: inline-flex; align-items: center; gap: .25rem; min-height: 44px; margin-inline-end: auto; }
 .changelog p { font-size: .9rem; color: var(--muted); }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .bottom-nav {
@@ -169,6 +171,17 @@ dialog {
   color: var(--text);
 }
 dialog::backdrop { background: #0b1b14a0; }
+#deleteDatesDialog {
+  inset: 0;
+  width: min(calc(100% - 1.5rem), 36rem);
+  margin: auto;
+  padding: 1rem;
+  overflow: auto;
+  border-radius: 1.1rem;
+}
+#deleteDatesStep { margin-block: .5rem; }
+#deleteDatesList { max-height: 30vh; overflow: auto; padding-inline-start: 1.5rem; }
+#deleteDatesDialog .row { justify-content: space-between; }
 #editForm { max-height: inherit; overflow: auto; padding: 0 1rem; }
 #editForm > label { margin-top: .6rem; }
 #editForm > .row, #editForm > p { margin-block: .65rem; }

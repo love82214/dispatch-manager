@@ -5,18 +5,10 @@ import unittest
 from playwright.sync_api import expect
 
 from tests.browser_support import (
-    FIXTURE, FIXTURE_TEXT, KEY, VIEWS, BrowserCase, get_download, navigate, persisted,
-    restore, stored_text, wait_for, warn,
+    DENY_WRITES, FIXTURE, FIXTURE_TEXT, KEY, TOMORROW, VIEWS, BrowserCase, get_download,
+    hold_write_lock, navigate, persisted, restore, stored_text, wait_for_writes, warn,
 )
 
-DENY_WRITES = """
-window.rejectWrites = true;
-const put = Storage.prototype.setItem;
-Storage.prototype.setItem = function(k, v) {
-  if (k === key && window.rejectWrites) throw new DOMException('Synthetic limit', 'QuotaExceededError');
-  return put.call(this, k, v);
-};
-"""
 DENY_READS = """
 window.normalGet = Storage.prototype.getItem;
 Storage.prototype.getItem = function(k) {
@@ -100,21 +92,11 @@ class StorageSafety(BrowserCase):
                 page.locator('[data-edit]').click()
                 page.locator('#eDriver').fill(name)
 
-            first.evaluate("""key => {
-              navigator.locks.request(key, () => new Promise(resolve => { window.releaseTest = resolve; }));
-            }""", KEY)
-            first.wait_for_function('() => typeof window.releaseTest === "function"')
-            def queued_writes():
-                return first.evaluate("""async key => (await navigator.locks.query()).pending
-                    .filter(lock => lock.name === key).length""", KEY)
-
-            try:
+            with hold_write_lock(first):
                 first.locator('#editForm footer button').click()
-                wait_for(lambda: queued_writes() == 1, 'First write did not acquire a place in the queue')
+                wait_for_writes(first, 1)
                 second.locator('#editForm footer button').click()
-                wait_for(lambda: queued_writes() == 2, 'Second write did not join the queue')
-            finally:
-                first.evaluate('window.releaseTest()')
+                wait_for_writes(first, 2)
             expect(first.locator('#toast')).to_have_text('已儲存異動')
             expect(second.locator('#editorStorage')).to_contain_text('另一個分頁已變更')
             expect(second.locator('#eDriver')).to_have_value('虛構分頁乙')
@@ -122,8 +104,12 @@ class StorageSafety(BrowserCase):
             second.locator('#closeEditor').click()
             warn(second, '本頁已停止寫入')
             second.locator('#nextDate').click()
+            expect(second.locator('#workDate')).to_have_value(TOMORROW)
             self.assertEqual(persisted(second), persisted(first))
             second.locator('#reloadStorage').click()
+            expect(second.locator('#workDate')).to_have_value(TOMORROW)
+            expect(second.locator('#recordStatus')).to_be_visible()
+            second.locator('#goToday').click()
             navigate(second, 'dispatch')
             expect(second.locator('#storageBanner')).to_be_hidden()
             expect(second.locator('#list')).to_contain_text('虛構分頁甲')

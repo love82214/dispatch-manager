@@ -9,7 +9,9 @@ const idNorm=s=>String(s).normalize('NFKC').toUpperCase().replace(/[－—–−
 const raw=``;
 function parse(text){let unit='未分組', rows=[], issues=[], ignored=[], rule=[];let seen=new Set();const lines=text.split(/\r?\n/); for(let i=0;i<lines.length;i++){let line=lines[i].normalize('NFKC').trim();if(!line)continue;const m=line.match(/軍\s*[A-Za-z0-9]+\s*[-－—–−]\s*\d+/i);if(!m){if(/^(左.{0,5}車長|左車長|日期|派車確認|北測派車|列管|應派)/.test(line))continue;if(/^(註|備註|注)[:：]/.test(line)){rule.push(line);continue}let h=line.split(/[｜|]/)[0].replace(/^[🔵🟢🔶●◆■#*\s]+/u,'').replace(/[:：\s]+$/,'').replace(/\s*\(\d+\s*(台|輛).*?\)$/,'').trim();if(ORDER.includes(h)||/^(?:[一二三四五六七八九十\d]+排|.{1,8}(?:排|組|班|連|營))$/.test(h)){unit=h;continue}issues.push(`第${i+1}行未辨識：${line}`);continue}const id=idNorm(m[0]);if(excluded(id)){ignored.push(id);continue}if(seen.has(id)){issues.push(`第${i+1}行重複車號：${id}（保留第一筆）`);continue}seen.add(id);let tail=line.slice(m.index+m[0].length).trim().replace(/^[:：\s]+/,'');let status=unit==='空車'?'空車':'正常派車',note='',task='',captain='',driver='';const nm=tail.match(/(?:備註|任務)[:：]\s*(.*)$/);if(nm){const fields=tail.slice(nm.index);for(const f of fields.matchAll(/(備註|任務)[:：]\s*(.*?)(?=\s*(?:備註|任務)[:：]|$)/g)){if(f[1]==='任務')task=f[2].trim();else note=f[2].trim()}tail=tail.slice(0,nm.index).trim()}const sm=tail.match(/(?:[（(【[]\s*)?(臨時不派|另有任務|故障維修|正常派車|不派|待命|空車)(?:\s*[）)】\]])?/);if(sm){status=sm[1];tail=(tail.slice(0,sm.index)+tail.slice(sm.index+sm[0].length)).trim()}const extra=tail.match(/[（(]([^）)]+)[）)]\s*$/);if(extra){note=[note,extra[1]].filter(Boolean).join('；');tail=tail.slice(0,extra.index).trim()}const names=tail.split(/\s*[、，,／/]\s*/).filter(Boolean);if(names.length>=2){captain=names[0];driver=names[1];if(names.length>2){note=[note,names.slice(2).join('、')].filter(Boolean).join('；');issues.push(`${id}：多於兩個欄位，已放入備註`)}}else if(tail){const parts=tail.split(/\s+/);captain=parts[0];driver=parts[1]||'';if(parts.length>2)note=[note,parts.slice(2).join(' ')].filter(Boolean).join('；')}if(status==='正常派車'&&(!captain||!driver))issues.push(`${id}：車長或駕駛未填`);rows.push({id,unit,status,captain,driver,note,task,checked:/^\s*(?:☑|✅|\[x\])/i.test(line)})}for(const r of rule){const m=r.match(/(?:註|備註|注)[:：]\s*(軍[A-Z0-9]+-\d+|\d+)\s*(?:禮拜|星期|週)一車長派([^、，,]+)[、，,]\s*二[～~至-]五派(.+)$/i);const matches=m?rows.filter(c=>/^軍/i.test(m[1])?c.id===idNorm(m[1]):c.id.endsWith(m[1])):[];if(matches.length===1){matches[0].rule={mon:m[2].trim(),week:m[3].trim()}}else issues.push('未自動套用的規則：'+r)}if(rows.some(c=>c.unit==='未分組'))issues.push('部分車輛未分組，請確認排組標題。');return {rows,issues,ignored}}
 function fixed(rows){return rows.map(c=>({...c,checked:false}))}function dayRows(base,date){return fixed(base).map(c=>({...c,captain:c.rule?(dow(date)===1?c.rule.mon:dow(date)>=2&&dow(date)<=5?c.rule.week:'待確認'):c.captain}))}
-function initial(){const base=fixed(parse(raw).rows),date=dateNow();return {version:5,base,date,rows:dayRows(base,date),history:{}}}
+function initial() {
+  return {version: 5, base: fixed(parse(raw).rows), date: dateNow(), rows: [], history: {}, noDateRecords: true};
+}
 function validRows(rows){return Array.isArray(rows)&&rows.every(c=>c&&valid(c.id)&&!excluded(c.id)&&typeof c.unit==='string'&&STATUS.includes(c.status)&&['captain','driver','note'].every(k=>typeof c[k]==='string')&&typeof c.checked==='boolean'&&(c.task===undefined||typeof c.task==='string')&&(!c.rule||(typeof c.rule.mon==='string'&&typeof c.rule.week==='string')))&&new Set(rows.map(c=>c.id)).size===rows.length}function validState(s){return s&&s.version===5&&validDate(s.date)&&validRows(s.base)&&validRows(s.rows)&&s.history&&typeof s.history==='object'&&!Array.isArray(s.history)&&Object.entries(s.history).every(([d,r])=>validDate(d)&&validRows(r))}
 function migrate(s){if(s.lastUpdate&&!s.updateByDate){s.updateByDate={[s.lastUpdate.date||s.date]:{...s.lastUpdate,date:s.lastUpdate.date||s.date}}}for(const rows of [s.base,s.rows,...Object.values(s.history)])for(const c of rows){if(c.task===undefined){c.task=''}}return s}
 const storageMessages = {
@@ -48,6 +50,7 @@ function showStorageStatus() {
   $('recoverStorage').hidden = storageProblem !== 'recovery';
   $('downloadRaw').hidden = storageProblem !== 'recovery';
   $('storage').textContent = message || '資料保存在此瀏覽器。';
+  renderDateSelection();
 }
 
 function setStorageProblem(problem) {
@@ -77,6 +80,7 @@ async function commitChange(change, {restore = false} = {}) {
         return false;
       }
       const draft = change(clone(state));
+      if (draft === null) return false;
       const nextText = JSON.stringify(draft);
       localStorage.setItem(KEY, nextText);
       storedText = nextText;
@@ -109,34 +113,85 @@ window.addEventListener('storage', event => {
   }
 });
 function validDate(d){return typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&!Number.isNaN(Date.parse(d+'T00:00:00Z'))&&new Date(d+'T00:00:00Z').toISOString().slice(0,10)===d&&d>='1900-01-01'&&d<='9999-12-31'}
-let followingToday=true;
-function moveDate(draft, date) {
-  if (draft.date === date) return draft;
-  draft.history[draft.date] = draft.rows;
-  draft.rows = Object.prototype.hasOwnProperty.call(draft.history, date)
-    ? draft.history[date] : dayRows(draft.base, date);
-  delete draft.history[date];
-  draft.date = date;
+// Keep the version-5 date/rows slot for saved data. The optional empty-set
+// marker distinguishes no records from a saved day that has zero vehicles.
+function hasPrimaryRecord(data) {
+  return data.noDateRecords !== true || data.rows.length > 0 || Object.keys(data.history).length > 0;
+}
+
+function recordRows(data, date) {
+  if (data.date === date && hasPrimaryRecord(data)) return data.rows;
+  return Object.prototype.hasOwnProperty.call(data.history, date) ? data.history[date] : undefined;
+}
+
+function recordDates(data) {
+  const dates = new Set(Object.keys(data.history));
+  if (hasPrimaryRecord(data)) dates.add(data.date);
+  return [...dates].sort().reverse();
+}
+
+function activeRows() {
+  return recordRows(state, selectedDate) ?? dayRows(state.base, selectedDate);
+}
+
+function putRecord(draft, date, rows) {
+  if (draft.date === date || !hasPrimaryRecord(draft)) {
+    draft.date = date;
+    draft.rows = rows;
+  } else {
+    draft.history[date] = rows;
+  }
+  delete draft.noDateRecords;
   return draft;
 }
 
-function clearDrafts(){if($('editor').open)$('editor').close();editing=null;pendingImport=null;$('preview').hidden=true;$('source').value='';previewDate='';$('historyText').hidden=true}
+async function changeRecord(date, update, {todayOnly = false, existingOnly = false} = {}) {
+  const requireToday = followingToday || todayOnly;
+  let dayChanged = false;
+  const saved = await commitChange(draft => {
+    if (requireToday && date !== dateNow()) {
+      dayChanged = true;
+      return null;
+    }
+    const savedRows = recordRows(draft, date);
+    if (existingOnly && !savedRows) return null;
+    const rows = update(savedRows ?? dayRows(draft.base, date), draft);
+    return rows === null ? null : putRecord(draft, date, rows);
+  });
+  if (dayChanged) {
+    refreshDate();
+    toast('日期已跨日，請確認作業日期後再操作。');
+  }
+  return saved;
+}
 
-async function chooseDate(date) {
-  if (!validDate(date)) {
-    toast('請輸入有效日期');
+function clearDrafts() {
+  if ($('editor').open) $('editor').close();
+  editing = null;
+  pendingImport = null;
+  $('preview').hidden = true;
+  $('source').value = '';
+  $('copyFallback').hidden = true;
+  $('copyFallback').value = '';
+  previewDate = '';
+}
+
+function showDate(date) {
+  if (date !== selectedDate) {
+    clearDrafts();
+    selectedDate = date;
+  }
+  render();
+}
+
+function chooseDate(date) {
+  if (writing || !validDate(date)) {
+    if (!writing) toast('請輸入有效日期');
     renderDateControls();
     return;
   }
-  if (date !== state.date) {
-    if (!await commitChange(draft => moveDate(draft, date))) {
-      renderDateControls();
-      return;
-    }
-    clearDrafts();
-  }
   setFollowingDate(date);
-  render();
+  showDate(date);
 }
 
 function setFollowingDate(date) {
@@ -145,37 +200,21 @@ function setFollowingDate(date) {
   savePreferences();
 }
 
-function needsRollover() {
-  return followingToday && state.date !== dateNow();
-}
-
-async function rollover() {
-  if (!needsRollover() || writing || storageProblem) return;
-  if (await commitChange(draft => moveDate(draft, dateNow()))) {
-    clearDrafts();
-    render();
-  }
+function rollover(today = dateNow()) {
+  if (!followingToday || selectedDate === today || writing) return false;
+  showDate(today);
+  return true;
 }
 
 function guardDay() {
-  if (!needsRollover()) return false;
-  if (storageProblem === 'failure' && !writing) {
-    // An explicit retry can probe storage again after the browser recovers.
-    commitChange(draft => moveDate(draft, dateNow())).then(saved => {
-      if (saved) {
-        clearDrafts();
-        render();
-      }
-    });
-  } else {
-    rollover();
-  }
+  if (!followingToday || selectedDate === dateNow()) return false;
+  rollover();
   toast('日期已跨日，請確認作業日期後再操作。');
   return true;
 }
 
 let filter='all',pendingImport=null,editing=null,toastTimer;
-function toast(s){if($('editor').open){$('editorMessage').textContent=s;return}$('toast').textContent=s;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{$('toast').hidden=true},3200)}function normal(c){return c.status==='正常派車'}function type(c){const k=c.id.match(/^軍([A-Z0-9]+)-/)[1];return TYPES[k]||'軍'+k}function groups(rows){return [...new Set(rows.map(c=>c.unit))].sort((a,b)=>(ORDER.includes(a)?ORDER.indexOf(a):99)-(ORDER.includes(b)?ORDER.indexOf(b):99))}function selectedRows(){const mode=$('statMode').value;return state.rows.filter(c=>mode==='all'||mode==='normal'&&normal(c)||mode==='done'&&normal(c)&&c.checked||mode==='pending'&&normal(c)&&!c.checked||mode==='other'&&c.status==='另有任務')}
+function toast(s){if($('editor').open){$('editorMessage').textContent=s;return}$('toast').textContent=s;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{$('toast').hidden=true},3200)}function normal(c){return c.status==='正常派車'}function type(c){const k=c.id.match(/^軍([A-Z0-9]+)-/)[1];return TYPES[k]||'軍'+k}function groups(rows){return [...new Set(rows.map(c=>c.unit))].sort((a,b)=>(ORDER.includes(a)?ORDER.indexOf(a):99)-(ORDER.includes(b)?ORDER.indexOf(b):99))}function selectedRows(rows){const mode=$('statMode').value;return rows.filter(c=>mode==='all'||mode==='normal'&&normal(c)||mode==='done'&&normal(c)&&c.checked||mode==='pending'&&normal(c)&&!c.checked||mode==='other'&&c.status==='另有任務')}
 const TYPES_IN_ORDER = ['輕戰', '悍馬', '中戰', '野救'];
 const UI_KEY = 'dispatch-mobile-v92-ui';
 const settingsDefaults = {theme: 'system', fontSize: 'normal', pinnedDate: null};
@@ -186,10 +225,15 @@ try {
 } catch {
   // Display preferences are optional.
 }
-followingToday = preferences.pinnedDate !== state.date;
+const pinnedDate = validDate(preferences.pinnedDate) ? preferences.pinnedDate : null;
+let followingToday = pinnedDate === null;
+let selectedDate = pinnedDate ?? dateNow();
+let lastRenderedToday = '';
 let selectedView = 'overview';
 let previewDate = '';
 const collapsedUnits = new Set();
+const checkedDates = new Set();
+let deleteRequest = null;
 
 function savePreferences() {
   try {
@@ -234,8 +278,8 @@ function showPage(view) {
   window.scrollTo(0, 0);
 }
 
-function dateLabel(date) {
-  return date === dateNow() ? '今天' : date < dateNow() ? '過去日期' : '未來日期';
+function dateLabel(date, today = dateNow()) {
+  return date === today ? '今天' : date < today ? '過去日期' : '未來日期';
 }
 
 function counts(rows) {
@@ -264,11 +308,12 @@ function chart(target, items) {
 }
 
 function renderStats() {
-  const rows = selectedRows();
-  const types = typeOrder(state.rows);
+  const daily = activeRows();
+  const rows = selectedRows(daily);
+  const types = typeOrder(daily);
   const totals = vehicleCounts(rows, types);
   const cells = values => types.map(t => `<td>${values.get(t)}</td>`).join('');
-  const units = groups(state.rows).map(unit => {
+  const units = groups(daily).map(unit => {
     const matching = rows.filter(c => c.unit === unit);
     return `<tr><th scope="row">${esc(unit)}</th>${cells(vehicleCounts(matching, types))}<td>${matching.length}</td></tr>`;
   });
@@ -316,20 +361,41 @@ function renderOverview(rows, units) {
   $('warning').innerHTML = warnings.map(w => `<li>${esc(w)}</li>`).join('');
 }
 
+function renderDateSelection() {
+  $('selectedDateCount').textContent = `已選 ${checkedDates.size} 筆`;
+  $('deleteSelectedDates').disabled = !checkedDates.size || !canWrite();
+}
+
 function renderHistory() {
-  const dates = [...new Set([state.date, ...Object.keys(state.history)])].sort().reverse();
+  const today = dateNow();
+  const dates = recordDates(state);
+  const deletable = new Set(dates.filter(date => date !== today));
+  for (const date of checkedDates) {
+    if (!deletable.has(date)) checkedDates.delete(date);
+  }
+  $('historySelection').hidden = deletable.size === 0;
+  renderDateSelection();
   $('historyList').innerHTML = dates.map(date => {
-    const current = date === state.date;
-    const {total, done} = counts(current ? state.rows : state.history[date]);
-    return `<div class="history-item"><button type="button" data-date="${date}" ${current ? 'aria-current="date"' : ''}><strong>${date}</strong> <span class="badge">${current ? '操作中' : dateLabel(date)}</span><br><small>列管 ${total}・已派 ${done}</small></button><button type="button" data-preview-date="${date}" aria-expanded="${previewDate === date}">預覽</button></div>`;
-  }).join('');
-  const preview = previewDate === state.date ? state.rows : state.history[previewDate];
+    const current = date === selectedDate;
+    const {total, done} = counts(recordRows(state, date));
+    const select = deletable.has(date)
+      ? `<label><input type="checkbox" data-select-date="${date}" aria-label="選取 ${date}" ${checkedDates.has(date) ? 'checked' : ''}>選取</label>`
+      : '';
+    const remove = deletable.has(date)
+      ? `<button type="button" class="danger" data-delete-date="${date}" aria-label="刪除 ${date}">刪除</button>`
+      : '';
+    return `<div class="history-item">
+      <button type="button" class="history-date" data-date="${date}" ${current ? 'aria-current="date"' : ''}><strong>${date}</strong> <span class="badge">${dateLabel(date, today)}${current ? '・操作中' : ''}</span><br><small>列管 ${total}・已派 ${done}</small></button>
+      <div class="row history-actions">${select}<button type="button" data-preview-date="${date}" aria-expanded="${previewDate === date}">預覽</button>${remove}</div>
+    </div>`;
+  }).join('') || '<p class="muted">尚無已儲存的日期紀錄。</p>';
+  const preview = recordRows(state, previewDate);
   $('historyText').hidden = !preview;
   $('historyText').textContent = preview ? report(previewDate, preview) : '';
 }
 
 function render() {
-  const rows = state.rows;
+  const rows = activeRows();
   const units = groups(rows);
   const oldUnit = $('unit').value;
   $('unit').innerHTML = '<option value="">全部排組</option>' + units.map(u => `<option>${esc(u)}</option>`).join('');
@@ -361,10 +427,11 @@ function renderVehicle(car) {
 function renderList() {
   const query = $('search').value.trim();
   const unit = $('unit').value;
-  const matching = state.rows.filter(c => (!unit || c.unit === unit) && filters[filter](c) &&
+  const rows = activeRows();
+  const matching = rows.filter(c => (!unit || c.unit === unit) && filters[filter](c) &&
     (!query || [c.id, c.captain, c.driver, c.task, c.note, c.status, type(c), c.checked ? '已確認' : '未確認'].join(' ').includes(query)));
   $('list').innerHTML = groups(matching).map(group => {
-    const full = state.rows.filter(c => c.unit === group);
+    const full = rows.filter(c => c.unit === group);
     const {total, required, done} = counts(full);
     const chips = [...vehicleCounts(full, typeOrder(full))].map(([name, value]) =>
       `<span class="badge">${esc(name)} ${value}</span>`).join('');
@@ -378,6 +445,81 @@ function selectFilter(value) {
     button.setAttribute('aria-pressed', button.dataset.filter === filter);
   }
   renderList();
+}
+
+function canDeleteDates(data, dates, today) {
+  return dates.length > 0 && dates.every(date => date !== today && recordRows(data, date) !== undefined);
+}
+
+function removeDateRecords(draft, dates, today) {
+  delete draft.noDateRecords;
+  for (const date of dates) {
+    delete draft.history[date];
+    if (draft.updateByDate && typeof draft.updateByDate === 'object') delete draft.updateByDate[date];
+    if (draft.lastUpdate?.date === date) delete draft.lastUpdate;
+  }
+  if (dates.includes(draft.date)) {
+    const remaining = Object.keys(draft.history).sort().pop();
+    draft.date = remaining ?? today;
+    draft.rows = remaining ? draft.history[remaining] : [];
+    if (remaining) {
+      delete draft.history[remaining];
+    } else {
+      draft.noDateRecords = true;
+    }
+  }
+  return draft;
+}
+
+function requestDateDeletion(dates) {
+  if (writing || !canWrite() || $('deleteDatesDialog').open) return;
+  if (!canDeleteDates(state, dates, dateNow())) {
+    renderHistory();
+    toast('今日紀錄不能刪除，請重新核對所選日期。');
+    return;
+  }
+  deleteRequest = dates.slice().sort().reverse();
+  $('deleteDatesList').replaceChildren(...deleteRequest.map(date => {
+    const item = document.createElement('li');
+    item.textContent = date;
+    return item;
+  }));
+  $('deleteDatesStep').textContent = '第 1 次確認。請核對將刪除的日期。';
+  $('deleteDatesList').scrollTop = 0;
+  $('reviewDeleteDates').hidden = false;
+  $('confirmDeleteDates').hidden = true;
+  $('confirmDeleteDates').disabled = false;
+  $('deleteDatesDialog').showModal();
+}
+
+async function confirmDateDeletion() {
+  const dialog = $('deleteDatesDialog');
+  const request = deleteRequest;
+  if (!dialog.open || !request || $('confirmDeleteDates').hidden || writing) return;
+  $('confirmDeleteDates').disabled = true;
+  let datesChanged = false;
+  const saved = await commitChange(draft => {
+    if (!dialog.open || deleteRequest !== request) return null;
+    const today = dateNow();
+    // A future date can become today while the user confirms or waits for the lock.
+    if (!canDeleteDates(draft, request, today)) {
+      datesChanged = true;
+      return null;
+    }
+    return removeDateRecords(draft, request, today);
+  });
+  if (deleteRequest === request) dialog.close();
+  if (saved) {
+    if (request.includes(selectedDate)) clearDrafts();
+    if (request.includes(previewDate)) previewDate = '';
+    render();
+    $('historyTitle').focus();
+    toast(`已刪除 ${request.length} 筆日期紀錄`);
+  } else if (datesChanged) {
+    refreshDate();
+    renderHistory();
+    toast('日期已有變動。今日紀錄不能刪除，請重新選取。');
+  }
 }
 
 function bindInterface() {
@@ -412,12 +554,32 @@ function bindInterface() {
   $('historyList').onclick = event => {
     const button = event.target.closest('button');
     if (button?.dataset.date) chooseDate(button.dataset.date);
+    if (button?.dataset.deleteDate) requestDateDeletion([button.dataset.deleteDate]);
     if (button?.dataset.previewDate) {
       const date = button.dataset.previewDate;
       previewDate = previewDate === date ? '' : date;
       renderHistory();
       $('historyList').querySelector(`[data-preview-date="${date}"]`).focus();
     }
+  };
+  $('historyList').onchange = event => {
+    const input = event.target;
+    const date = input.dataset.selectDate;
+    if (!date) return;
+    if (input.checked) checkedDates.add(date);
+    else checkedDates.delete(date);
+    renderDateSelection();
+  };
+  $('deleteSelectedDates').onclick = () => requestDateDeletion([...checkedDates]);
+  $('reviewDeleteDates').onclick = () => {
+    $('deleteDatesStep').textContent = '第 2 次確認。刪除後只能透過備份還原。';
+    $('reviewDeleteDates').hidden = true;
+    $('confirmDeleteDates').hidden = false;
+    $('cancelDeleteDates').focus();
+  };
+  $('confirmDeleteDates').onclick = confirmDateDeletion;
+  $('deleteDatesDialog').onclose = () => {
+    if (!$('deleteDatesDialog').open) deleteRequest = null;
   };
   const viewport = window.visualViewport;
   if (viewport) {
@@ -436,13 +598,41 @@ async function changeCheck(id, checked) {
     renderList();
     return;
   }
-  await commitChange(draft => {
-    draft.rows.find(car => car.id === id).checked = checked;
-    return draft;
+  await changeRecord(selectedDate, rows => {
+    const car = rows.find(item => item.id === id);
+    if (!car || car.checked === checked) return null;
+    car.checked = checked;
+    return rows;
   });
   render();
 }
-function edit(id){if(guardDay()||!canWrite())return;editing=id;$('editorMessage').textContent='';const c=state.rows.find(c=>c.id===id)||{id:'',unit:$('unit').value||'保',status:'正常派車',captain:'',driver:'',note:''};$('editTitle').textContent=(id?'修改 '+id:'新增車輛')+'｜'+state.date;for(const [k,v] of Object.entries({eId:c.id,eUnit:c.unit,eStatus:c.status,eCaptain:c.captain,eDriver:c.driver,eTask:c.note}))$(k).value=v;$('eTaskChoice').value=TASKS.includes(c.task)?c.task:c.task?'custom':'';$('eTaskCustom').value=c.task&&!TASKS.includes(c.task)?c.task:'';$('eTaskCustom').hidden=$('eTaskChoice').value!=='custom';$('eFixed').checked=false;$('eFixed').disabled=state.date!==dateNow();$('deleteCar').hidden=!id;$('restoreCar').hidden=!id||!state.base.some(x=>x.id===id);$('editor').showModal()}
+function edit(id) {
+  if (guardDay() || !canWrite()) return;
+  editing = id;
+  $('editorMessage').textContent = '';
+  const car = activeRows().find(c => c.id === id) ||
+    {id: '', unit: $('unit').value || '保', status: '正常派車', captain: '', driver: '', note: ''};
+  $('editTitle').textContent = (id ? '修改 ' + id : '新增車輛') + '｜' + selectedDate;
+  for (const [key, value] of Object.entries({
+    eId: car.id, eUnit: car.unit, eStatus: car.status,
+    eCaptain: car.captain, eDriver: car.driver, eTask: car.note
+  })) $(key).value = value;
+  $('eTaskChoice').value = TASKS.includes(car.task) ? car.task : car.task ? 'custom' : '';
+  $('eTaskCustom').value = car.task && !TASKS.includes(car.task) ? car.task : '';
+  $('eTaskCustom').hidden = $('eTaskChoice').value !== 'custom';
+  $('eFixed').checked = false;
+  $('eFixed').disabled = selectedDate !== dateNow();
+  $('deleteCar').hidden = !id;
+  $('restoreCar').hidden = !id || !recordRows(state, selectedDate) || !state.base.some(c => c.id === id);
+  $('editor').showModal();
+}
+
+function sameCarDetails(old, car) {
+  return old && ['id', 'unit', 'status', 'captain', 'driver', 'task', 'note']
+    .every(key => (old[key] ?? '') === (car[key] ?? '')) &&
+    old.rule?.mon === car.rule?.mon && old.rule?.week === car.rule?.week;
+}
+
 function merge(old,rows){const m=new Map(old.map(c=>[c.id,c]));for(const c of rows)m.set(c.id,c);return [...m.values()]}
 $('eTaskChoice').onchange=()=>{$('eTaskCustom').hidden=$('eTaskChoice').value!=='custom'};$('eStatus').innerHTML=STATUS.map(s=>`<option>${s}</option>`).join('');$('list').addEventListener('change',e=>{if(e.target.dataset.check)changeCheck(e.target.dataset.check,e.target.checked)});$('list').onclick = event => {
   const summary = event.target.closest('summary');
@@ -461,17 +651,19 @@ $('editForm').onsubmit = async event => {
   event.preventDefault();
   if (guardDay() || !canWrite()) return;
   const id = idNorm($('eId').value);
-  const fixedEdit = $('eFixed').checked && state.date === dateNow();
+  const date = selectedDate;
+  const rows = activeRows();
+  const fixedEdit = $('eFixed').checked;
   if (!valid(id) || excluded(id)) {
     toast('車號格式錯誤，或為已排除的軍9');
     return;
   }
-  if (state.rows.some(c => c.id === id && id !== editing) ||
+  if (rows.some(c => c.id === id && id !== editing) ||
       (fixedEdit && state.base.some(c => c.id === id && id !== editing))) {
     toast('車號已存在');
     return;
   }
-  const old = state.rows.find(c => c.id === editing);
+  const old = rows.find(c => c.id === editing);
   const choice = $('eTaskChoice').value;
   const car = {
     id, unit: $('eUnit').value.trim(), status: $('eStatus').value,
@@ -485,15 +677,17 @@ $('editForm').onsubmit = async event => {
   }
   if (old?.rule) car.rule = old.rule;
   const editingId = editing;
-  if (!await commitChange(draft => {
-    draft.rows = old ? draft.rows.map(c => c.id === editingId ? car : c) : [...draft.rows, car];
-    if (fixedEdit) {
-      const baseCar = {...car};
-      if (baseCar.rule && old?.captain !== car.captain) delete baseCar.rule;
-      draft.base = merge(draft.base.filter(c => c.id !== editingId), [baseCar]);
-    }
-    return draft;
-  })) return;
+  const baseCar = fixedEdit ? {...car} : null;
+  if (baseCar?.rule && old?.captain !== car.captain) delete baseCar.rule;
+  if (!recordRows(state, date) && sameCarDetails(old, car) &&
+      (!baseCar || sameCarDetails(state.base.find(c => c.id === editingId), baseCar))) {
+    $('editor').close();
+    return;
+  }
+  if (!await changeRecord(date, (daily, draft) => {
+    if (baseCar) draft.base = merge(draft.base.filter(c => c.id !== editingId), [baseCar]);
+    return old ? daily.map(c => c.id === editingId ? car : c) : [...daily, car];
+  }, {todayOnly: fixedEdit})) return;
   $('editor').close();
   render();
   toast('已儲存異動');
@@ -502,11 +696,10 @@ $('editForm').onsubmit = async event => {
 $('restoreCar').onclick = async () => {
   if (guardDay() || !canWrite()) return;
   const id = editing;
-  const baseCar = dayRows(state.base, state.date).find(c => c.id === id);
-  if (!baseCar || !await commitChange(draft => {
-    draft.rows = draft.rows.map(c => c.id === id ? baseCar : c);
-    return draft;
-  })) return;
+  const date = selectedDate;
+  const baseCar = dayRows(state.base, date).find(c => c.id === id);
+  if (!baseCar || !await changeRecord(date, daily => daily.map(c => c.id === id ? baseCar : c),
+    {existingOnly: true})) return;
   $('editor').close();
   render();
 };
@@ -515,13 +708,12 @@ $('deleteCar').onclick = async () => {
   if (guardDay() || !canWrite()) return;
   const permanent = $('eFixed').checked;
   const id = editing;
-  const date = state.date;
+  const date = selectedDate;
   if (!confirm(permanent ? `從固定名單及 ${date} 刪除？` : `只從 ${date} 刪除？`)) return;
-  if (!await commitChange(draft => {
-    draft.rows = draft.rows.filter(c => c.id !== id);
+  if (!await changeRecord(date, (daily, draft) => {
     if (permanent) draft.base = draft.base.filter(c => c.id !== id);
-    return draft;
-  })) return;
+    return daily.filter(c => c.id !== id);
+  }, {todayOnly: permanent})) return;
   $('editor').close();
   render();
 };
@@ -534,7 +726,7 @@ function rosterText(rows){return groups(rows).map(u=>u+'\n'+rows.filter(c=>c.uni
 $('sample').onclick=()=>{$('source').value=rosterText(state.base);$('preview').hidden=true;pendingImport=null};$('source').oninput=()=>{$('preview').hidden=true;pendingImport=null};$('parse').onclick=()=>{pendingImport=parse($('source').value);const p=pendingImport;$('parseResult').textContent=`辨識 ${p.rows.length} 輛｜排除軍9 ${p.ignored.length} 輛\n`+groups(p.rows).map(g=>`${g}：${p.rows.filter(c=>c.unit===g).length} 輛`).join('\n')+(p.ignored.length?'\n排除：'+p.ignored.join('、'):'')+(p.issues.length?'\n⚠ 請核對：\n'+p.issues.join('\n'):'')+'\n\n'+rosterText(p.rows);$('apply').disabled=!p.rows.length;$('preview').hidden=false};$('apply').onclick = async () => {
   if (guardDay() || !canWrite() || !pendingImport?.rows.length) return;
   const mode = $('importMode').value;
-  const date = state.date;
+  const date = selectedDate;
   if (date !== dateNow() && mode !== 'today') {
     toast('其他日期只可修改該日名單');
     return;
@@ -544,16 +736,14 @@ $('sample').onclick=()=>{$('source').value=rosterText(state.base);$('preview').h
   const rows = clone(pendingImport.rows);
   const checked = new Map(rows.map(c => [c.id, c.checked]));
   const daily = dayRows(rows, date).map(c => ({...c, checked: checked.get(c.id)}));
-  if (!await commitChange(draft => {
+  if (!await changeRecord(date, (existing, draft) => {
     if (mode === 'merge') {
       draft.base = merge(draft.base, fixed(rows));
-      draft.rows = merge(draft.rows, daily);
-    } else {
-      if (mode === 'replace') draft.base = fixed(rows);
-      draft.rows = daily;
+      return merge(existing, daily);
     }
-    return draft;
-  })) return;
+    if (mode === 'replace') draft.base = fixed(rows);
+    return daily;
+  }, {todayOnly: mode !== 'today'})) return;
   pendingImport = null;
   $('preview').hidden = true;
   $('source').value = '';
@@ -562,15 +752,23 @@ $('sample').onclick=()=>{$('source').value=rosterText(state.base);$('preview').h
   toast('已套用名單');
 };
 function report(date,rows,pending=false){const rr=pending?rows.filter(c=>normal(c)&&!c.checked):rows,n=rows.filter(normal);return [`${date} 派車確認表`,`列管${rows.length}輛／應派${n.length}輛／已派${n.filter(c=>c.checked).length}輛／未確認${n.filter(c=>!c.checked).length}輛`,...STATUS.slice(1).map(s=>`${s}：${rows.filter(c=>c.status===s).length}輛`),...taskCounts(rows).map(([t,n])=>`任務 ${t}：${n}輛`),'左車長、右駕駛',...groups(rr).flatMap(g=>{const a=rr.filter(c=>c.unit===g);return ['',g+'｜'+[...new Set(a.map(type))].map(t=>`${t} ${a.filter(c=>type(c)===t).length}`).join('、'),...a.map(c=>`${c.checked?'☑':'☐'} ${c.id} ${[c.captain,c.driver].filter(Boolean).join('、')}${normal(c)?'':'（'+c.status+'）'}${c.task?' 任務：'+c.task:''}${c.note?' 備註：'+c.note:''}`)]})].join('\n')}
-async function copyText(text){try{await navigator.clipboard.writeText(text);toast('已複製')}catch(e){const t=$('copyFallback');t.hidden=false;t.value=text;t.focus();t.select();try{if(document.execCommand('copy')){toast('已複製');return}}catch(e){}toast('請長按文字自行複製')}}function download(name,text,mime){const a=document.createElement('a'),url=URL.createObjectURL(new Blob([text],{type:mime}));a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000)}$('copy').onclick = () => { if (!guardDay() && storedText !== undefined && storageProblem !== 'recovery') copyText(report(state.date, state.rows)); };
-$('copyPending').onclick = () => { if (!guardDay() && storedText !== undefined && storageProblem !== 'recovery') copyText(report(state.date, state.rows, true)); };
+async function copyText(text){try{await navigator.clipboard.writeText(text);toast('已複製')}catch(e){const t=$('copyFallback');t.hidden=false;t.value=text;t.focus();t.select();try{if(document.execCommand('copy')){toast('已複製');return}}catch(e){}toast('請長按文字自行複製')}}function download(name,text,mime){const a=document.createElement('a'),url=URL.createObjectURL(new Blob([text],{type:mime}));a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000)}
+
+function selectedReport(pending = false) {
+  const saved = recordRows(state, selectedDate);
+  return (saved ? '' : '尚未建立紀錄（固定編組預覽）\n') +
+    report(selectedDate, saved ?? activeRows(), pending);
+}
+
+$('copy').onclick = () => { if (!guardDay() && storedText !== undefined && storageProblem !== 'recovery') copyText(selectedReport()); };
+$('copyPending').onclick = () => { if (!guardDay() && storedText !== undefined && storageProblem !== 'recovery') copyText(selectedReport(true)); };
 $('export').onclick = () => {
   if (guardDay() || storedText === undefined || storageProblem === 'recovery') return;
-  download('派車-' + state.date + '.txt', '\ufeff' + report(state.date, state.rows), 'text/plain;charset=utf-8');
+  download('派車-' + selectedDate + '.txt', '\ufeff' + selectedReport(), 'text/plain;charset=utf-8');
 };
 $('backup').onclick = () => {
   if (storedText === undefined || storageProblem === 'recovery') return;
-  download('派車備份-' + state.date + '.json', JSON.stringify(state, null, 2), 'application/json');
+  download('派車備份-' + selectedDate + '.json', JSON.stringify(state, null, 2), 'application/json');
 };
 $('restore').onclick = $('recoverStorage').onclick = () => $('backupFile').click();
 $('reloadStorage').onclick = () => location.reload();
@@ -588,10 +786,10 @@ $('backupFile').onchange = async event => {
     if (!confirm(recovering
       ? '以備份取代異常資料？如需保留異常內容，請先取消並下載原始資料。'
       : '以備份取代現有資料？')) return;
-    if (!await commitChange(() => moveDate(migrate(restored), dateNow()), {restore: true})) return;
+    if (!await commitChange(() => migrate(restored), {restore: true})) return;
     clearDrafts();
-    setFollowingDate(state.date);
-    render();
+    checkedDates.clear();
+    chooseDate(dateNow());
     toast('已還原備份');
   } catch (error) {
     toast('無法還原：' + error.message);
@@ -601,34 +799,42 @@ $('backupFile').onchange = async event => {
 };
 $('reset').onclick = async () => {
   if (guardDay() || !canWrite()) return;
-  if (!confirm(`只清除 ${state.date} 的全部勾選及異動，恢復固定編組？其他日期不受影響。`)) return;
-  if (await commitChange(draft => {
-    draft.rows = dayRows(draft.base, draft.date);
-    return draft;
-  })) render();
+  const date = selectedDate;
+  if (!recordRows(state, date)) return;
+  if (!confirm(`只清除 ${date} 的全部勾選及異動，恢復固定編組？其他日期不受影響。`)) return;
+  if (await changeRecord(date, (_rows, draft) => dayRows(draft.base, date), {existingOnly: true})) render();
 };
 setInterval(refreshDate, 1000);
 function taskCounts(rows){const m=new Map(TASKS.map(t=>[t,0]));for(const c of rows)if(c.task)m.set(c.task,(m.get(c.task)||0)+1);return [...m]}
 function renderDateControls() {
-  const date = state.date;
-  const today = date === dateNow();
+  const date = selectedDate;
+  lastRenderedToday = dateNow();
+  const today = date === lastRenderedToday;
+  const saved = recordRows(state, date) !== undefined;
   $('date').textContent = date + ' 週' + '日一二三四五六'[dow(date)];
   $('workDate').value = date;
-  $('dateHint').textContent = dateLabel(date);
-  $('goToday').disabled = today;
+  $('dateHint').textContent = dateLabel(date, lastRenderedToday);
+  $('recordStatus').hidden = saved;
+  $('reset').disabled = !saved;
+  $('goToday').disabled = today && followingToday;
   const mode = $('importMode');
   for (const option of mode.options) option.disabled = !today && option.value !== 'today';
   if (!today) mode.value = 'today';
 }
 
 function refreshDate() {
-  rollover();
-  if ($('dateHint').textContent !== dateLabel(state.date)) {
+  const today = dateNow();
+  if (!rollover(today) && lastRenderedToday !== today) {
     renderDateControls();
     renderHistory();
   }
 }
-function adjacentDate(delta){const d=new Date(state.date+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+delta);chooseDate(d.toISOString().slice(0,10))}
+
+function adjacentDate(delta) {
+  const date = new Date(selectedDate + 'T00:00:00Z');
+  date.setUTCDate(date.getUTCDate() + delta);
+  chooseDate(date.toISOString().slice(0, 10));
+}
 $('workDate').onchange = () => chooseDate($('workDate').value);
 $('prevDate').onclick = () => adjacentDate(-1);
 $('nextDate').onclick = () => adjacentDate(1);
@@ -641,7 +847,7 @@ refreshDate();
 // Update only static application assets; records are not transmitted.
 let reg=null, updating=false, waitingWorker=null;
 const versionMsg=s=>{$('versionStatus').textContent=s};
-function safeToUpdate(){return !writing&&!$('editor').open&&!pendingImport&&!$('source').value.trim()&&!document.hidden;}
+function safeToUpdate(){return !writing&&!$('editor').open&&!$('deleteDatesDialog').open&&!pendingImport&&!$('source').value.trim()&&!document.hidden;}
 let reloadPending = false;
 function applyWaiting() {
   if (!safeToUpdate()) return;
@@ -657,7 +863,7 @@ function applyWaiting() {
 function offerWorker(w){if(!w)return;waitingWorker=w;versionMsg('新版本已下載，編輯完成後自動更新。');applyWaiting();}
 async function checkVersion(manual=false){if(!reg){if(manual)versionMsg('自動更新需使用 HTTPS 網站及支援 Service Worker 的瀏覽器。');return;}try{await reg.update();if(reg.waiting&&navigator.serviceWorker.controller)offerWorker(reg.waiting);else if(manual&&!updating)versionMsg('已檢查更新；如有新版將自動套用。');}catch(e){if(manual)versionMsg('目前無法連線檢查，仍可使用本機資料。');}}
 $('checkVersion').onclick=()=>checkVersion(true);
-if('serviceWorker' in navigator&&window.isSecureContext){let hadController=!!navigator.serviceWorker.controller;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(hadController||updating){reloadPending=true;applyWaiting();}else{hadController=true;versionMsg('V9.2｜離線程式已啟用');}});navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(r=>{reg=r;if(r.waiting&&navigator.serviceWorker.controller)offerWorker(r.waiting);r.addEventListener('updatefound',()=>{const w=r.installing;if(w)w.addEventListener('statechange',()=>{if(w.state==='installed'&&navigator.serviceWorker.controller)offerWorker(w);});});checkVersion();}).catch(()=>versionMsg('V9.2｜離線快取未啟用，請使用 HTTPS 網站'));setInterval(()=>checkVersion(),900000);setInterval(applyWaiting,1500);}else versionMsg('V9.2｜目前環境不支援自動更新');
+if('serviceWorker' in navigator&&window.isSecureContext){let hadController=!!navigator.serviceWorker.controller;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(hadController||updating){reloadPending=true;applyWaiting();}else{hadController=true;versionMsg('V9.3｜離線程式已啟用');}});navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(r=>{reg=r;if(r.waiting&&navigator.serviceWorker.controller)offerWorker(r.waiting);r.addEventListener('updatefound',()=>{const w=r.installing;if(w)w.addEventListener('statechange',()=>{if(w.state==='installed'&&navigator.serviceWorker.controller)offerWorker(w);});});checkVersion();}).catch(()=>versionMsg('V9.3｜離線快取未啟用，請使用 HTTPS 網站'));setInterval(()=>checkVersion(),900000);setInterval(applyWaiting,1500);}else versionMsg('V9.3｜目前環境不支援自動更新');
 
 window.addEventListener('focus', () => {
   refreshDate();

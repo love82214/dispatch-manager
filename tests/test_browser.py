@@ -123,7 +123,10 @@ class BrowserRegression(BrowserCase):
         with self.app(seed=FIXTURE_TEXT) as (page, _):
             page.locator('#prevDate').click()
             expect(page.locator('#workDate')).to_have_value(YESTERDAY)
-            self.assertEqual(persisted(page)['rows'], FIXTURE['history'][YESTERDAY])
+            self.assertEqual(stored_text(page), FIXTURE_TEXT)
+            navigate(page, 'dispatch')
+            expect(page.locator('#list')).to_contain_text('虛構歷史備註1')
+            expect(page.locator('#recordStatus')).to_be_hidden()
             page.reload()
             expect(page.locator('#workDate')).to_have_value(YESTERDAY)
             navigate(page, 'records')
@@ -162,9 +165,11 @@ class BrowserRegression(BrowserCase):
         with self.app(seed=FIXTURE_TEXT, time=midnight, ticking=True) as (page, _):
             page.clock.fast_forward(5000)
             expect(page.locator('#workDate')).to_have_value(TOMORROW)
-            self.assertEqual(persisted(page)['history'][TODAY], FIXTURE['rows'])
-            for date in FIXTURE['history']:
-                self.assertEqual(persisted(page)['history'][date], FIXTURE['history'][date])
+            expect(page.locator('#recordStatus')).to_be_visible()
+            self.assertEqual(stored_text(page), FIXTURE_TEXT)
+            navigate(page, 'records')
+            expect(page.locator(f'[data-date="{TODAY}"]')).to_be_visible()
+            expect(page.locator(f'[data-date="{TOMORROW}"]')).to_have_count(0)
 
     def test_old_version_auto_update_and_offline(self):
         previous_ref = upgrade_ref(release_info(), os.environ.get('UPGRADE_BASE_REF') or None)
