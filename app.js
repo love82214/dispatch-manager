@@ -17,40 +17,336 @@ function save(){try{localStorage.setItem(KEY,JSON.stringify(state));storageOK=tr
 function validDate(d){return typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&!Number.isNaN(Date.parse(d+'T00:00:00Z'))&&new Date(d+'T00:00:00Z').toISOString().slice(0,10)===d&&d>='1900-01-01'&&d<='9999-12-31'}
 let followingToday=true;
 function moveDate(date){if(!validDate(date))return false;if(state.date===date)return false;state.history[state.date]=clone(state.rows);state.rows=Object.prototype.hasOwnProperty.call(state.history,date)?clone(state.history[date]):dayRows(state.base,date);delete state.history[date];state.date=date;save();return true}
-function clearDrafts(){if($('editor').open)$('editor').close();editing=null;pendingImport=null;$('preview').hidden=true;$('source').value='';$('historyText').hidden=true;$('history').value='';$('cancelUpdate').click()}
-function chooseDate(date){if(!validDate(date)){toast('請輸入有效日期');render();return}if(date!==state.date){clearDrafts();moveDate(date)}followingToday=date===dateNow();render()}
+function clearDrafts(){if($('editor').open)$('editor').close();editing=null;pendingImport=null;$('preview').hidden=true;$('source').value='';previewDate='';$('historyText').hidden=true}
+function chooseDate(date){if(!validDate(date)){toast('請輸入有效日期');render();return}if(date!==state.date){clearDrafts();moveDate(date)}followingToday=date===dateNow();preferences.pinnedDate=followingToday?null:date;savePreferences();render()}
 function rollover(){if(followingToday&&state.date!==dateNow()){moveDate(dateNow());clearDrafts();return true}return false}let filter='all',pendingImport=null,editing=null,toastTimer;
-function toast(s){$('toast').textContent=s;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{$('toast').hidden=true},3200)}function normal(c){return c.status==='正常派車'}function type(c){const k=c.id.match(/^軍([A-Z0-9]+)-/)[1];return TYPES[k]||'軍'+k}function groups(rows){return [...new Set(rows.map(c=>c.unit))].sort((a,b)=>(ORDER.includes(a)?ORDER.indexOf(a):99)-(ORDER.includes(b)?ORDER.indexOf(b):99))}function selectedRows(){const mode=$('statMode').value;return state.rows.filter(c=>mode==='all'||mode==='normal'&&normal(c)||mode==='done'&&normal(c)&&c.checked||mode==='pending'&&normal(c)&&!c.checked||mode==='other'&&c.status==='另有任務')}
-function renderStats(){const rows=selectedRows(),units=groups(state.rows),types=[...new Set(state.rows.map(type))].sort((a,b)=>{const o=['輕戰','悍馬','中戰','野救'];return (o.includes(a)?o.indexOf(a):99)-(o.includes(b)?o.indexOf(b):99)||a.localeCompare(b)});const tr=(u,rr)=>`<tr><td>${esc(u)}</td>${types.map(t=>`<td>${rr.filter(c=>type(c)===t).length||'—'}</td>`).join('')}<td>${rr.length}</td></tr>`;$('stats').innerHTML=`<table><thead><tr><th>排組</th>${types.map(t=>`<th>${esc(t)}</th>`).join('')}<th>合計</th></tr></thead><tbody>${units.map(u=>tr(u,rows.filter(c=>c.unit===u))).join('')}</tbody><tfoot>${tr('合計',rows)}</tfoot></table>`}
-function render(){rollover();const r=state.rows,n=r.filter(normal),done=n.filter(c=>c.checked).length;const count=s=>r.filter(c=>c.status===s).length;$('date').textContent=state.date+' 星期'+'日一二三四五六'[dow(state.date)];renderDateControls();$('metrics').innerHTML=[['列管',r.length],['應派',n.length],['已派',done],['未確認',n.length-done],['另有任務',count('另有任務')],['空車',count('空車')],['不派／臨時不派',count('不派')+count('臨時不派')],['待命',count('待命')],['維修',count('故障維修')]].map(([s,v])=>`<div class="metric"><span>${s}</span><b>${v}</b></div>`).join('');const people=new Map();for(const c of r.filter(c=>normal(c)||c.status==='另有任務'))for(const name of [c.captain,c.driver].map(x=>x.replace(/⚠️?/g,'').trim()).filter(x=>x&&x!=='待確認')){if(!people.has(name))people.set(name,[]);people.get(name).push(c.id)}const warnings=[...people].filter(([n,ids])=>ids.length>1).map(([n,ids])=>`${n} 重複編組：${ids.join('、')}`);const missing=n.filter(c=>!c.captain||!c.driver||c.captain==='待確認');if(missing.length)warnings.push('人員未確認：'+missing.map(c=>c.id).join('、'));$('warning').textContent=warnings.join('\n');const units=groups(r),old=$('unit').value;$('unit').innerHTML='<option value="">全部排組</option>'+units.map(u=>`<option>${esc(u)}</option>`).join('');$('unit').value=units.includes(old)?old:'';$('unitOptions').innerHTML=[...new Set([...ORDER,...units])].map(u=>`<option value="${esc(u)}">`).join('');renderStats();renderList();renderTasks();renderUpdateNotice();const h=$('history').value;$('history').innerHTML='<option value="">選擇日期</option>'+Object.keys(state.history).sort().reverse().map(d=>`<option>${esc(d)}</option>`).join('');$('history').value=state.history[h]?h:'';save()}
-function renderList(){const q=$('search').value.trim(),u=$('unit').value;const r=state.rows.filter(c=>(!u||c.unit===u)&&(!q||[c.id,c.captain,c.driver,c.task,c.note,c.status,type(c)].join(' ').includes(q))&&(filter==='all'||filter==='pending'&&normal(c)&&!c.checked||filter==='done'&&normal(c)&&c.checked||filter==='special'&&!normal(c)));$('list').innerHTML=groups(r).map(g=>{const full=state.rows.filter(c=>c.unit===g),list=r.filter(c=>c.unit===g),n=full.filter(normal);const chips=[...new Set(full.map(type))].map(t=>`<span class="chip">${esc(t)} ${full.filter(c=>type(c)===t).length}</span>`).join('');return `<section><div class="row between"><h3>${esc(g)}</h3><small>已派 ${n.filter(c=>c.checked).length}/${n.length}｜列管 ${full.length}</small></div><div class="chips">${chips}</div>${list.map(c=>`<div class="car ${c.checked?'done':''}"><label><input type="checkbox" data-check="${esc(c.id)}" ${c.checked?'checked':''} aria-label="確認 ${esc(c.id)}"><span class="grow"><b>${esc(c.id)}${normal(c)?'':`<span class="tag">${esc(c.status)}</span>`}</b><span class="people">${esc(c.captain||'未指定')}、${esc(c.driver||'未指定')}</span>${c.task?`<br><small>任務：${esc(c.task)}</small>`:''}${c.note?`<br><small>備註：${esc(c.note)}</small>`:''}</span></label><button class="edit" data-edit="${esc(c.id)}" aria-label="修改 ${esc(c.id)}">修改</button></div>`).join('')}</section>`}).join('')||'<p class="muted">沒有符合條件的車輛。</p>'}
+function toast(s){if($('editor').open){$('editorMessage').textContent=s;return}$('toast').textContent=s;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{$('toast').hidden=true},3200)}function normal(c){return c.status==='正常派車'}function type(c){const k=c.id.match(/^軍([A-Z0-9]+)-/)[1];return TYPES[k]||'軍'+k}function groups(rows){return [...new Set(rows.map(c=>c.unit))].sort((a,b)=>(ORDER.includes(a)?ORDER.indexOf(a):99)-(ORDER.includes(b)?ORDER.indexOf(b):99))}function selectedRows(){const mode=$('statMode').value;return state.rows.filter(c=>mode==='all'||mode==='normal'&&normal(c)||mode==='done'&&normal(c)&&c.checked||mode==='pending'&&normal(c)&&!c.checked||mode==='other'&&c.status==='另有任務')}
+const TYPES_IN_ORDER = ['輕戰', '悍馬', '中戰', '野救'];
+const UI_KEY = 'dispatch-mobile-v92-ui';
+const settingsDefaults = {theme: 'system', fontSize: 'normal', pinnedDate: null};
+let preferences = {...settingsDefaults};
+try {
+  const saved = JSON.parse(localStorage.getItem(UI_KEY));
+  if (saved && typeof saved === 'object') preferences = {...preferences, ...saved};
+} catch {
+  // Display preferences are optional.
+}
+followingToday = preferences.pinnedDate !== state.date;
+let selectedView = 'overview';
+let previewDate = '';
+const collapsedUnits = new Set();
+
+function savePreferences() {
+  try {
+    localStorage.setItem(UI_KEY, JSON.stringify(preferences));
+  } catch {
+    // Keep the current display settings for this session.
+  }
+}
+
+function applyDisplay() {
+  const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+  const theme = $('theme');
+  const font = $('fontSize');
+  theme.value = preferences.theme;
+  font.value = preferences.fontSize;
+  if (!theme.value) theme.value = settingsDefaults.theme;
+  if (!font.value) font.value = settingsDefaults.fontSize;
+  const update = () => {
+    document.documentElement.dataset.theme = theme.value === 'system'
+      ? (systemTheme.matches ? 'dark' : 'light') : theme.value;
+    document.documentElement.dataset.font = font.value;
+  };
+  theme.onchange = font.onchange = () => {
+    preferences.theme = theme.value;
+    preferences.fontSize = font.value;
+    update();
+    savePreferences();
+  };
+  if (systemTheme.addEventListener) systemTheme.addEventListener('change', update);
+  else systemTheme.addListener(update);
+  update();
+}
+
+function showPage(view) {
+  if (view === selectedView) return;
+  document.getElementById(selectedView).hidden = true;
+  document.getElementById(view).hidden = false;
+  const active = $('navigation').querySelector('[aria-current]');
+  active.removeAttribute('aria-current');
+  $('navigation').querySelector('[data-view="' + view + '"]').setAttribute('aria-current', 'page');
+  selectedView = view;
+  window.scrollTo(0, 0);
+}
+
+function dateLabel(date) {
+  return date === dateNow() ? '今天' : date < dateNow() ? '過去日期' : '未來日期';
+}
+
+function counts(rows) {
+  const required = rows.filter(normal);
+  return {total: rows.length, required: required.length, done: required.filter(c => c.checked).length};
+}
+
+function typeOrder(rows) {
+  return [...new Set([...TYPES_IN_ORDER, ...rows.map(type).sort()])];
+}
+
+function vehicleCounts(rows, types) {
+  const counts = new Map(types.map(t => [t, 0]));
+  for (const car of rows) {
+    const name = type(car);
+    counts.set(name, counts.get(name) + 1);
+  }
+  return counts;
+}
+
+function chart(target, items) {
+  const max = Math.max(1, ...items.map(([, count]) => count));
+  $(target).innerHTML = items.map(([label, count]) =>
+    `<div class="chart-row"><div class="row between"><span>${esc(label)}</span><b>${count} 輛</b></div><progress value="${count}" max="${max}" aria-label="${esc(label)}：${count} 輛"></progress></div>`
+  ).join('');
+}
+
+function renderStats() {
+  const rows = selectedRows();
+  const types = typeOrder(state.rows);
+  const totals = vehicleCounts(rows, types);
+  const cells = values => types.map(t => `<td>${values.get(t)}</td>`).join('');
+  const units = groups(state.rows).map(unit => {
+    const matching = rows.filter(c => c.unit === unit);
+    return `<tr><th scope="row">${esc(unit)}</th>${cells(vehicleCounts(matching, types))}<td>${matching.length}</td></tr>`;
+  });
+  $('stats').innerHTML = `<table><thead><tr><th scope="col">排組</th>${types.map(t => `<th scope="col">${esc(t)}</th>`).join('')}<th scope="col">合計</th></tr></thead><tbody>${units.join('')}</tbody><tfoot><tr><th scope="row">合計</th>${cells(totals)}<td>${rows.length}</td></tr></tfoot></table>`;
+  chart('typeChart', [...totals]);
+  const tasks = taskCounts(rows);
+  tasks.push(['未指定任務', rows.filter(c => !c.task).length]);
+  chart('taskStats', tasks);
+}
+
+function renderOverview(rows, units) {
+  const {total, required, done} = counts(rows);
+  const percentage = required ? Math.round(done / required * 100) : 0;
+  $('completionRing').style.setProperty('--progress', percentage + '%');
+  $('completionRing').setAttribute('aria-label', required ? `完成率 ${percentage}%` : '沒有應派車輛');
+  $('completionValue').textContent = required ? percentage + '%' : '—';
+  $('completionLabel').textContent = required ? `已派 ${done} 輛，共 ${required} 輛應派` : '目前沒有應派車輛';
+  const metric = ([name, count]) => `<div class="metric"><b>${count}</b><span>${name}</span></div>`;
+  const countStatus = (...statuses) => rows.filter(c => statuses.includes(c.status)).length;
+  $('metrics').innerHTML = [['列管', total], ['應派', required], ['已派', done], ['未確認', required - done]].map(metric).join('');
+  $('secondaryMetrics').innerHTML = [
+    ['另有任務', countStatus('另有任務')], ['空車', countStatus('空車')],
+    ['不派', countStatus('不派', '臨時不派')], ['待命', countStatus('待命')],
+    ['維修', countStatus('故障維修')]
+  ].map(metric).join('');
+  $('groupProgress').innerHTML = units.map(unit => {
+    const group = counts(rows.filter(c => c.unit === unit));
+    return `<button class="unit-progress" type="button" data-unit="${esc(unit)}"><span class="row between"><strong>${esc(unit)}</strong><small>已派 ${group.done} / ${group.required}・列管 ${group.total}</small></span><progress value="${group.done}" max="${group.required || 1}" aria-label="排組派車進度"></progress></button>`;
+  }).join('') || '<p class="muted">尚無排組。可匯入名單或新增車輛。</p>';
+
+  const people = new Map();
+  for (const car of rows.filter(c => normal(c) || c.status === '另有任務')) {
+    for (const name of [car.captain, car.driver].map(x => x.replace(/⚠️?/g, '').trim())) {
+      if (!name || name === '待確認') continue;
+      if (!people.has(name)) people.set(name, []);
+      people.get(name).push(car.id);
+    }
+  }
+  const warnings = [...people].filter(([, ids]) => ids.length > 1)
+    .map(([name, ids]) => `${name} 重複編組：${ids.join('、')}`);
+  const missing = rows.filter(c => normal(c) && (!c.captain || !c.driver || c.captain === '待確認'));
+  if (missing.length) warnings.push('人員未確認：' + missing.map(c => c.id).join('、'));
+  $('warnings').hidden = !warnings.length;
+  $('warningTitle').textContent = `編組警示（${warnings.length}）`;
+  $('warning').innerHTML = warnings.map(w => `<li>${esc(w)}</li>`).join('');
+}
+
+function renderHistory() {
+  const dates = [...new Set([state.date, ...Object.keys(state.history)])].sort().reverse();
+  $('historyList').innerHTML = dates.map(date => {
+    const current = date === state.date;
+    const {total, done} = counts(current ? state.rows : state.history[date]);
+    return `<div class="history-item"><button type="button" data-date="${date}" ${current ? 'aria-current="date"' : ''}><strong>${date}</strong> <span class="badge">${current ? '操作中' : dateLabel(date)}</span><br><small>列管 ${total}・已派 ${done}</small></button><button type="button" data-preview-date="${date}" aria-expanded="${previewDate === date}">預覽</button></div>`;
+  }).join('');
+  const preview = previewDate === state.date ? state.rows : state.history[previewDate];
+  $('historyText').hidden = !preview;
+  $('historyText').textContent = preview ? report(previewDate, preview) : '';
+}
+
+function render() {
+  rollover();
+  const rows = state.rows;
+  const units = groups(rows);
+  const oldUnit = $('unit').value;
+  $('unit').innerHTML = '<option value="">全部排組</option>' + units.map(u => `<option>${esc(u)}</option>`).join('');
+  $('unit').value = units.includes(oldUnit) ? oldUnit : '';
+  $('unitOptions').innerHTML = [...new Set([...ORDER, ...units])].map(u => `<option value="${esc(u)}">`).join('');
+  renderDateControls();
+  renderOverview(rows, units);
+  renderStats();
+  renderList();
+  renderHistory();
+  save();
+}
+
+const filters = {
+  all: () => true,
+  pending: c => normal(c) && !c.checked,
+  done: c => normal(c) && c.checked,
+  special: c => !normal(c),
+  empty: c => c.status === '空車'
+};
+
+function renderVehicle(car) {
+  const id = esc(car.id);
+  const status = normal(car) ? (car.checked ? '已確認' : '未確認') : car.status;
+  const details = [car.task && '任務：' + car.task, car.note && '備註：' + car.note];
+  return `<div class="car ${car.checked ? 'done' : ''}"><label><input type="checkbox" data-check="${id}" ${car.checked ? 'checked' : ''} aria-label="確認 ${id}"><span><b>${id}</b><span class="badge ${normal(car) ? '' : 'special'}">${esc(status)}</span><small>${esc(car.captain || '未指定')}、${esc(car.driver || '未指定')}</small>${details.filter(Boolean).map(d => `<small>${esc(d)}</small>`).join('')}</span></label><button type="button" class="edit" data-edit="${id}" aria-label="修改 ${id}">修改</button></div>`;
+}
+
+function renderList() {
+  const query = $('search').value.trim();
+  const unit = $('unit').value;
+  const matching = state.rows.filter(c => (!unit || c.unit === unit) && filters[filter](c) &&
+    (!query || [c.id, c.captain, c.driver, c.task, c.note, c.status, type(c), c.checked ? '已確認' : '未確認'].join(' ').includes(query)));
+  $('list').innerHTML = groups(matching).map(group => {
+    const full = state.rows.filter(c => c.unit === group);
+    const {total, required, done} = counts(full);
+    const chips = [...vehicleCounts(full, typeOrder(full))].map(([name, value]) =>
+      `<span class="badge">${esc(name)} ${value}</span>`).join('');
+    return `<details class="panel unit-card" data-group="${esc(group)}" ${collapsedUnits.has(group) ? '' : 'open'}><summary>${esc(group)} <small>已派 ${done}/${required}・列管 ${total}</small></summary><div class="chips">${chips}</div>${matching.filter(c => c.unit === group).map(renderVehicle).join('')}</details>`;
+  }).join('') || '<section class="panel muted">沒有符合條件的車輛。</section>';
+}
+
+function selectFilter(value) {
+  filter = value;
+  for (const button of $('filters').querySelectorAll('button')) {
+    button.setAttribute('aria-pressed', button.dataset.filter === filter);
+  }
+  renderList();
+}
+
+function bindInterface() {
+  $('navigation').onclick = event => {
+    const button = event.target.closest('[data-view]');
+    if (button) showPage(button.dataset.view);
+  };
+  $('overview').onclick = event => {
+    const unit = event.target.closest('[data-unit]');
+    if (unit) {
+      $('unit').value = unit.dataset.unit;
+      $('search').value = '';
+      collapsedUnits.delete(unit.dataset.unit);
+      selectFilter('all');
+      showPage('dispatch');
+      return;
+    }
+    const quick = event.target.closest('[data-quick]')?.dataset.quick;
+    if (quick === 'export') $('export').click();
+    if (quick === 'new') {
+      $('unit').value = '';
+      renderList();
+      showPage('dispatch');
+      edit(null);
+    }
+    if (quick === 'import') {
+      showPage('dispatch');
+      $('importPanel').open = true;
+      $('importPanel').scrollIntoView({block: 'start'});
+    }
+  };
+  $('historyList').onclick = event => {
+    const button = event.target.closest('button');
+    if (button?.dataset.date) chooseDate(button.dataset.date);
+    if (button?.dataset.previewDate) {
+      const date = button.dataset.previewDate;
+      previewDate = previewDate === date ? '' : date;
+      renderHistory();
+      $('historyList').querySelector(`[data-preview-date="${date}"]`).focus();
+    }
+  };
+  const viewport = window.visualViewport;
+  if (viewport) {
+    const resizeEditor = () => {
+      const editor = $('editor');
+      editor.style.setProperty('--editor-height', viewport.height + 'px');
+      editor.style.bottom = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop) + 'px';
+    };
+    viewport.addEventListener('resize', resizeEditor);
+    viewport.addEventListener('scroll', resizeEditor);
+    resizeEditor();
+  }
+}
 function changeCheck(id,v){if(rollover()){render();toast('已跨日，請重新確認今日名單');return}const c=state.rows.find(c=>c.id===id);if(c){c.checked=v;save();render()}}
-function edit(id){if(rollover())render();editing=id;const c=state.rows.find(c=>c.id===id)||{id:'',unit:$('unit').value||'保',status:'正常派車',captain:'',driver:'',note:''};$('editTitle').textContent=(id?'修改 '+id:'新增車輛')+'｜'+state.date;for(const [k,v] of Object.entries({eId:c.id,eUnit:c.unit,eStatus:c.status,eCaptain:c.captain,eDriver:c.driver,eTask:c.note}))$(k).value=v;$('eTaskChoice').value=TASKS.includes(c.task)?c.task:c.task?'custom':'';$('eTaskCustom').value=c.task&&!TASKS.includes(c.task)?c.task:'';$('eTaskCustom').hidden=$('eTaskChoice').value!=='custom';$('eFixed').checked=false;$('eFixed').disabled=state.date!==dateNow();$('deleteCar').hidden=!id;$('restoreCar').hidden=!id||!state.base.some(x=>x.id===id);$('editor').showModal()}
+function edit(id){if(rollover())render();editing=id;$('editorMessage').textContent='';const c=state.rows.find(c=>c.id===id)||{id:'',unit:$('unit').value||'保',status:'正常派車',captain:'',driver:'',note:''};$('editTitle').textContent=(id?'修改 '+id:'新增車輛')+'｜'+state.date;for(const [k,v] of Object.entries({eId:c.id,eUnit:c.unit,eStatus:c.status,eCaptain:c.captain,eDriver:c.driver,eTask:c.note}))$(k).value=v;$('eTaskChoice').value=TASKS.includes(c.task)?c.task:c.task?'custom':'';$('eTaskCustom').value=c.task&&!TASKS.includes(c.task)?c.task:'';$('eTaskCustom').hidden=$('eTaskChoice').value!=='custom';$('eFixed').checked=false;$('eFixed').disabled=state.date!==dateNow();$('deleteCar').hidden=!id;$('restoreCar').hidden=!id||!state.base.some(x=>x.id===id);$('editor').showModal()}
 function merge(old,rows){const m=new Map(old.map(c=>[c.id,c]));for(const c of rows)m.set(c.id,c);return [...m.values()]}
-$('eTaskChoice').onchange=()=>{$('eTaskCustom').hidden=$('eTaskChoice').value!=='custom'};$('eStatus').innerHTML=STATUS.map(s=>`<option>${s}</option>`).join('');$('list').addEventListener('change',e=>{if(e.target.dataset.check)changeCheck(e.target.dataset.check,e.target.checked)});$('list').addEventListener('click',e=>{const b=e.target.closest('[data-edit]');if(b)edit(b.dataset.edit)});$('newCar').onclick=()=>edit(null);$('closeEditor').onclick=()=>$('editor').close();$('editForm').onsubmit=e=>{e.preventDefault();if(rollover()){$('editor').close();render();toast('已跨日，請重新開啟車輛修改');return}const id=idNorm($('eId').value);if(!valid(id)||excluded(id)){toast('車號格式錯誤，或為已排除的軍9');return}if(state.rows.some(c=>c.id===id&&id!==editing)||($('eFixed').checked&&state.base.some(c=>c.id===id&&id!==editing))){toast('車號已存在');return}const old=state.rows.find(c=>c.id===editing),c={id,unit:$('eUnit').value.trim(),status:$('eStatus').value,captain:$('eCaptain').value.trim(),driver:$('eDriver').value.trim(),task:$('eTaskChoice').value==='custom'?$('eTaskCustom').value.trim():$('eTaskChoice').value,note:$('eTask').value.trim(),checked:false};if(!c.unit){toast('請填排組');return}if($('eTaskChoice').value==='custom'&&!c.task){toast('請填自訂任務');return}if(old?.rule)c.rule=old.rule;state.rows=old?state.rows.map(x=>x.id===editing?c:x):[...state.rows,c];if($('eFixed').checked&&state.date===dateNow()){const b={...c};if(b.rule&&old?.captain!==c.captain)delete b.rule;state.base=merge(state.base.filter(x=>x.id!==editing),[b])}save();$('editor').close();render();toast('已儲存異動')};$('restoreCar').onclick=()=>{if(rollover()){$('editor').close();render();return}const b=dayRows(state.base,state.date).find(c=>c.id===editing);if(b){state.rows=state.rows.map(c=>c.id===editing?b:c);$('editor').close();render()}};$('deleteCar').onclick=()=>{if(rollover()){$('editor').close();render();return}const permanent=$('eFixed').checked;if(confirm(permanent?'從固定名單及 '+state.date+' 刪除？':'只從 '+state.date+' 刪除？')){state.rows=state.rows.filter(c=>c.id!==editing);if(permanent)state.base=state.base.filter(c=>c.id!==editing);$('editor').close();render()}};
-$('filters').onclick=e=>{const b=e.target.closest('[data-filter]');if(b){filter=b.dataset.filter;for(const el of $('filters').querySelectorAll('button'))el.setAttribute('aria-pressed',el===b);renderList()}};$('search').oninput=renderList;$('unit').onchange=renderList;$('statMode').onchange=renderStats;
+$('eTaskChoice').onchange=()=>{$('eTaskCustom').hidden=$('eTaskChoice').value!=='custom'};$('eStatus').innerHTML=STATUS.map(s=>`<option>${s}</option>`).join('');$('list').addEventListener('change',e=>{if(e.target.dataset.check)changeCheck(e.target.dataset.check,e.target.checked)});$('list').onclick = event => {
+  const summary = event.target.closest('summary');
+  if (summary) {
+    const group = summary.parentElement;
+    if (group.open) collapsedUnits.add(group.dataset.group);
+    else collapsedUnits.delete(group.dataset.group);
+    return;
+  }
+  const button = event.target.closest('[data-edit]');
+  if (button) edit(button.dataset.edit);
+};
+$('newCar').onclick=()=>edit(null);$('closeEditor').onclick=()=>$('editor').close();$('editForm').onsubmit=e=>{e.preventDefault();if(rollover()){$('editor').close();render();toast('已跨日，請重新開啟車輛修改');return}const id=idNorm($('eId').value);if(!valid(id)||excluded(id)){toast('車號格式錯誤，或為已排除的軍9');return}if(state.rows.some(c=>c.id===id&&id!==editing)||($('eFixed').checked&&state.base.some(c=>c.id===id&&id!==editing))){toast('車號已存在');return}const old=state.rows.find(c=>c.id===editing),c={id,unit:$('eUnit').value.trim(),status:$('eStatus').value,captain:$('eCaptain').value.trim(),driver:$('eDriver').value.trim(),task:$('eTaskChoice').value==='custom'?$('eTaskCustom').value.trim():$('eTaskChoice').value,note:$('eTask').value.trim(),checked:false};if(!c.unit){toast('請填排組');return}if($('eTaskChoice').value==='custom'&&!c.task){toast('請填自訂任務');return}if(old?.rule)c.rule=old.rule;state.rows=old?state.rows.map(x=>x.id===editing?c:x):[...state.rows,c];if($('eFixed').checked&&state.date===dateNow()){const b={...c};if(b.rule&&old?.captain!==c.captain)delete b.rule;state.base=merge(state.base.filter(x=>x.id!==editing),[b])}save();$('editor').close();render();toast('已儲存異動')};$('restoreCar').onclick=()=>{if(rollover()){$('editor').close();render();return}const b=dayRows(state.base,state.date).find(c=>c.id===editing);if(b){state.rows=state.rows.map(c=>c.id===editing?b:c);$('editor').close();render()}};$('deleteCar').onclick=()=>{if(rollover()){$('editor').close();render();return}const permanent=$('eFixed').checked;if(confirm(permanent?'從固定名單及 '+state.date+' 刪除？':'只從 '+state.date+' 刪除？')){state.rows=state.rows.filter(c=>c.id!==editing);if(permanent)state.base=state.base.filter(c=>c.id!==editing);$('editor').close();render()}};
+$('filters').onclick = event => {
+  const button = event.target.closest('[data-filter]');
+  if (button) selectFilter(button.dataset.filter);
+};
+$('search').oninput=renderList;$('unit').onchange=renderList;$('statMode').onchange=renderStats;
 function rosterText(rows){return groups(rows).map(u=>u+'\n'+rows.filter(c=>c.unit===u).map(c=>`${c.id} ${[c.captain,c.driver].filter(Boolean).join('、')}${normal(c)?'':'（'+c.status+'）'}${c.task?' 任務：'+c.task:''}${c.note?' 備註：'+c.note:''}`).join('\n')).join('\n\n')+rows.filter(c=>c.rule).map(c=>'\n註：'+c.id+' 星期一車長派'+c.rule.mon+'、二～五派'+c.rule.week).join('')}
 $('sample').onclick=()=>{$('source').value=rosterText(state.base);$('preview').hidden=true;pendingImport=null};$('source').oninput=()=>{$('preview').hidden=true;pendingImport=null};$('parse').onclick=()=>{pendingImport=parse($('source').value);const p=pendingImport;$('parseResult').textContent=`辨識 ${p.rows.length} 輛｜排除軍9 ${p.ignored.length} 輛\n`+groups(p.rows).map(g=>`${g}：${p.rows.filter(c=>c.unit===g).length} 輛`).join('\n')+(p.ignored.length?'\n排除：'+p.ignored.join('、'):'')+(p.issues.length?'\n⚠ 請核對：\n'+p.issues.join('\n'):'')+'\n\n'+rosterText(p.rows);$('apply').disabled=!p.rows.length;$('preview').hidden=false};$('apply').onclick=()=>{if(rollover()){render();toast('已跨日，請重新辨識');return}if(!pendingImport?.rows.length)return;const mode=$('importMode').value;if(state.date!==dateNow()&&mode!=='today'){toast('其他日期只可修改該日名單');return}if(!confirm('套用至 '+state.date+'？'+(mode==='merge'?'同車號所選日期的勾選與異動將重置。':'所選日期現有名單與異動會被替換，建議先備份。')))return;const r=clone(pendingImport.rows);if(mode==='merge'){state.base=merge(state.base,fixed(r));state.rows=merge(state.rows,dayRows(r,state.date).map(c=>({...c,checked:r.find(x=>x.id===c.id).checked})))}else{if(mode==='replace')state.base=fixed(r);state.rows=dayRows(r,state.date).map(c=>({...c,checked:r.find(x=>x.id===c.id).checked}))}pendingImport=null;$('preview').hidden=true;$('source').value='';$('importPanel').open=false;render();toast('已套用名單')};
 function report(date,rows,pending=false){const rr=pending?rows.filter(c=>normal(c)&&!c.checked):rows,n=rows.filter(normal);return [`${date} 派車確認表`,`列管${rows.length}輛／應派${n.length}輛／已派${n.filter(c=>c.checked).length}輛／未確認${n.filter(c=>!c.checked).length}輛`,...STATUS.slice(1).map(s=>`${s}：${rows.filter(c=>c.status===s).length}輛`),...taskCounts(rows).map(([t,n])=>`任務 ${t}：${n}輛`),'左車長、右駕駛',...groups(rr).flatMap(g=>{const a=rr.filter(c=>c.unit===g);return ['',g+'｜'+[...new Set(a.map(type))].map(t=>`${t} ${a.filter(c=>type(c)===t).length}`).join('、'),...a.map(c=>`${c.checked?'☑':'☐'} ${c.id} ${[c.captain,c.driver].filter(Boolean).join('、')}${normal(c)?'':'（'+c.status+'）'}${c.task?' 任務：'+c.task:''}${c.note?' 備註：'+c.note:''}`)]})].join('\n')}
-async function copyText(text){try{await navigator.clipboard.writeText(text);toast('已複製')}catch(e){const t=$('copyFallback');t.hidden=false;t.value=text;t.focus();t.select();try{if(document.execCommand('copy')){toast('已複製');return}}catch(e){}toast('請長按文字自行複製')}}function download(name,text,mime){const a=document.createElement('a'),url=URL.createObjectURL(new Blob([text],{type:mime}));a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000)}$('copy').onclick=()=>{rollover();copyText(report(state.date,state.rows))};$('copyPending').onclick=()=>{rollover();copyText(report(state.date,state.rows,true))};$('export').onclick=()=>{rollover();download('派車-'+state.date+'.txt','\ufeff'+report(state.date,state.rows),'text/plain;charset=utf-8')};$('backup').onclick=()=>{rollover();download('派車備份-'+state.date+'.json',JSON.stringify(state,null,2),'application/json')};$('restore').onclick=()=>$('backupFile').click();$('backupFile').onchange=async e=>{try{const f=e.target.files[0];if(!f)return;const s=JSON.parse(await f.text());if(!validState(s))throw Error('備份格式不符');if(confirm('以備份取代現有資料？')){clearDrafts();state=migrate(s);followingToday=true;moveDate(dateNow());render();toast('已還原備份')}}catch(err){toast('無法還原：'+err.message)}finally{e.target.value=''}};$('history').onchange=()=>{const d=$('history').value;$('historyText').hidden=!d;$('historyText').textContent=d?report(d,state.history[d]):''};$('refresh').onclick=()=>chooseDate(dateNow());$('reset').onclick=()=>{rollover();if(confirm('只清除 '+state.date+' 的全部勾選及異動，恢復固定編組？其他日期不受影響。')){state.rows=dayRows(state.base,state.date);render()}};document.addEventListener('visibilitychange',()=>{if(!document.hidden&&rollover())render()});window.addEventListener('focus',()=>{if(rollover())render()});setInterval(()=>{if(rollover())render()},1000);
+async function copyText(text){try{await navigator.clipboard.writeText(text);toast('已複製')}catch(e){const t=$('copyFallback');t.hidden=false;t.value=text;t.focus();t.select();try{if(document.execCommand('copy')){toast('已複製');return}}catch(e){}toast('請長按文字自行複製')}}function download(name,text,mime){const a=document.createElement('a'),url=URL.createObjectURL(new Blob([text],{type:mime}));a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000)}$('copy').onclick=()=>{rollover();copyText(report(state.date,state.rows))};$('copyPending').onclick=()=>{rollover();copyText(report(state.date,state.rows,true))};$('export').onclick=()=>{rollover();download('派車-'+state.date+'.txt','\ufeff'+report(state.date,state.rows),'text/plain;charset=utf-8')};$('backup').onclick=()=>{rollover();download('派車備份-'+state.date+'.json',JSON.stringify(state,null,2),'application/json')};$('restore').onclick=()=>$('backupFile').click();$('backupFile').onchange=async e=>{try{const f=e.target.files[0];if(!f)return;const s=JSON.parse(await f.text());if(!validState(s))throw Error('備份格式不符');if(confirm('以備份取代現有資料？')){clearDrafts();state=migrate(s);followingToday=true;preferences.pinnedDate=null;savePreferences();moveDate(dateNow());render();toast('已還原備份')}}catch(err){toast('無法還原：'+err.message)}finally{e.target.value=''}};$('reset').onclick=()=>{rollover();if(confirm('只清除 '+state.date+' 的全部勾選及異動，恢復固定編組？其他日期不受影響。')){state.rows=dayRows(state.base,state.date);render()}};setInterval(refreshDate,1000);
 function taskCounts(rows){const m=new Map(TASKS.map(t=>[t,0]));for(const c of rows)if(c.task)m.set(c.task,(m.get(c.task)||0)+1);return [...m]}
-function renderTasks(){$('taskStats').innerHTML=taskCounts(state.rows).map(([t,n])=>`<div class="row between" style="padding:6px 0"><span>${esc(t)}</span><b>${n} 輛</b></div>`).join('')}
-function renderUpdateNotice(){const a=state.updateByDate?.[state.date]||(state.lastUpdate?.date===state.date?state.lastUpdate:null);$('updateNotice').textContent=a?`最近匯入：${a.author||'未署名'}｜${a.at}｜${a.count} 輛`:'尚未匯入他人更新。'}
-let updateReview=null; const fields=['unit','status','captain','driver','task','note','checked'];const fieldNames={unit:'排組',status:'狀態',captain:'車長',driver:'駕駛',task:'任務',note:'備註',checked:'確認'};const val=(c,k)=>k==='checked'?(c?.[k]?'已確認':'未確認'):(c?.[k]||'無');const signature=c=>JSON.stringify(c?fields.map(k=>k==='checked'?!!c[k]:c[k]||''):null);
-$('shareUpdate').onclick=async()=>{rollover();const payload={kind:'dispatch-update',schema:1,date:state.date,author:$('author').value.trim(),created:new Date().toISOString(),rows:clone(state.rows)};const name='派車更新-'+state.date+'.json',json=JSON.stringify(payload,null,2);try{const f=new File([json],name,{type:'application/json'});if(navigator.canShare?.({files:[f]})){await navigator.share({files:[f],title:'派車更新 '+state.date});return}}catch(e){if(e.name==='AbortError')return}download(name,json,'application/json');toast('已產生更新檔，請使用核准管道傳送')};
-$('importUpdate').onclick=()=>$('updateFile').click();$('updateFile').onchange=async e=>{try{const f=e.target.files[0];if(!f)return;rollover();const p=JSON.parse(await f.text());if(p.kind!=='dispatch-update'||p.schema!==1||!validRows(p.rows)||typeof p.author!=='string'||typeof p.created!=='string')throw Error('更新檔格式不符');if(!validDate(p.date))throw Error('更新檔日期無效');if(p.date!==state.date){if(!confirm('更新檔屬於 '+p.date+'，目前為 '+state.date+'。切換到檔案日期進行比對？不會修改目前日期。'))return;chooseDate(p.date)}const diffs=p.rows.map(c=>({incoming:c,current:state.rows.find(x=>x.id===c.id)})).filter(x=>signature(x.incoming)!==signature(x.current));updateReview={p,diffs};$('reviewInfo').textContent=`作業日期：${p.date}\n修改者：${p.author||'未署名'}｜檔案時間：${p.created}\n${diffs.length} 輛有差異。僅套用你勾選的車輛；勾選狀態也會一起更新。未出現在對方名單的車輛不刪除。`; $('reviewRows').innerHTML=diffs.map(({incoming:c,current:b},i)=>`<div style="border-top:1px solid var(--line);padding:8px 0"><label><input type="checkbox" data-review="${i}"> ${esc(c.id)}${b?'':'（新增）'}</label><div class="notice">${fields.filter(k=>!b||val(b,k)!==val(c,k)).map(k=>`${fieldNames[k]}：${esc(val(b,k))} → ${esc(val(c,k))}`).join('<br>')}</div></div>`).join('')||'<p>沒有差異。</p>';$('updateReview').hidden=false;$('applyUpdate').disabled=!diffs.length}catch(err){toast('無法匯入：'+err.message)}finally{e.target.value=''}};
-$('cancelUpdate').onclick=()=>{updateReview=null;$('updateReview').hidden=true};$('applyUpdate').onclick=()=>{if(!updateReview)return;if(rollover()||updateReview.p.date!==state.date){$('cancelUpdate').click();render();toast('日期已變更，請重新匯入');return}const chosen=[...$('reviewRows').querySelectorAll('[data-review]:checked')].map(el=>updateReview.diffs[Number(el.dataset.review)]);if(!chosen.length){toast('請先選擇異動');return}if(chosen.some(x=>signature(state.rows.find(c=>c.id===x.incoming.id))!==signature(x.current))){toast('本機資料已變動，請重新匯入核對');return}if(!confirm(`套用至 ${state.date} 的 ${chosen.length} 輛異動？`))return;state.rows=merge(state.rows,chosen.map(x=>({...x.incoming,task:x.incoming.task||''})));state.updateByDate=state.updateByDate||{};state.updateByDate[state.date]={date:state.date,author:updateReview.p.author,at:new Date().toLocaleString('zh-TW',{timeZone:'Asia/Taipei'}),count:chosen.length};$('cancelUpdate').click();render();toast('已套用他人異動')};
-function renderDateControls(){const now=dateNow(),d=state.date;$('workDate').value=d;$('dateHint').textContent=d===now?'正在處理今天。午夜自動切換；已建立的日期紀錄會保留。':`正在處理 ${d}（${d<now?'過去日期':'未來日期'}），所有勾選、任務、統計及匯出只屬於該日，不會變動今天。`;$('dateHint').className=d===now?'notice muted':'notice warn';$('goToday').disabled=d===now;const dates=[...new Set([d,...Object.keys(state.history)])].sort().reverse();$('savedDates').innerHTML='<option value="">切換已儲存日期</option>'+dates.map(x=>`<option value="${esc(x)}">${esc(x)}${x===now?'（今天）':''}</option>`).join('');$('savedDates').value=d;const mode=$('importMode');for(const opt of mode.options)opt.disabled=d!==now&&opt.value!=='today';if(d!==now)mode.value='today'}
+function renderDateControls() {
+  const date = state.date;
+  const today = date === dateNow();
+  $('date').textContent = date + ' 週' + '日一二三四五六'[dow(date)];
+  $('workDate').value = date;
+  $('dateHint').textContent = dateLabel(date);
+  $('goToday').disabled = today;
+  const mode = $('importMode');
+  for (const option of mode.options) option.disabled = !today && option.value !== 'today';
+  if (!today) mode.value = 'today';
+}
+
+function refreshDate() {
+  if (rollover()) render();
+  else if ($('dateHint').textContent !== dateLabel(state.date)) {
+    renderDateControls();
+    renderHistory();
+  }
+}
 function adjacentDate(delta){const d=new Date(state.date+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+delta);chooseDate(d.toISOString().slice(0,10))}
-$('workDate').onchange=()=>chooseDate($('workDate').value);$('savedDates').onchange=()=>{if($('savedDates').value)chooseDate($('savedDates').value)};$('prevDate').onclick=()=>adjacentDate(-1);$('nextDate').onclick=()=>adjacentDate(1);$('goToday').onclick=()=>chooseDate(dateNow());
-moveDate(dateNow());render();
+$('workDate').onchange = () => chooseDate($('workDate').value);
+$('prevDate').onclick = () => adjacentDate(-1);
+$('nextDate').onclick = () => adjacentDate(1);
+$('goToday').onclick = () => chooseDate(dateNow());
+applyDisplay();
+bindInterface();
+render();
 
 // Update only static application assets; records are not transmitted.
 let reg=null, updating=false, waitingWorker=null;
 const versionMsg=s=>{$('versionStatus').textContent=s};
-function safeToUpdate(){return !$('editor').open&&!pendingImport&&!$('source').value.trim()&&!updateReview&&!document.hidden;}
+function safeToUpdate(){return !$('editor').open&&!pendingImport&&!$('source').value.trim()&&!document.hidden;}
 function applyWaiting(){if(!waitingWorker||updating||!safeToUpdate())return;save();if(!storageOK){versionMsg('有新版，但本機儲存不可用，請先備份後再更新。');return;}updating=true;versionMsg('正在更新程式，保留本機資料…');waitingWorker.postMessage({type:'ACTIVATE'});}
 function offerWorker(w){if(!w)return;waitingWorker=w;versionMsg('新版本已下載，編輯完成後自動更新。');applyWaiting();}
 async function checkVersion(manual=false){if(!reg){if(manual)versionMsg('自動更新需使用 HTTPS 網站及支援 Service Worker 的瀏覽器。');return;}try{await reg.update();if(reg.waiting&&navigator.serviceWorker.controller)offerWorker(reg.waiting);else if(manual&&!updating)versionMsg('已檢查更新；如有新版將自動套用。');}catch(e){if(manual)versionMsg('目前無法連線檢查，仍可使用本機資料。');}}
 $('checkVersion').onclick=()=>checkVersion(true);
-if('serviceWorker' in navigator&&window.isSecureContext){let hadController=!!navigator.serviceWorker.controller;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(hadController||updating){save();location.reload();}else{hadController=true;versionMsg('V9.1｜離線程式已啟用');}});navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(r=>{reg=r;if(r.waiting&&navigator.serviceWorker.controller)offerWorker(r.waiting);r.addEventListener('updatefound',()=>{const w=r.installing;if(w)w.addEventListener('statechange',()=>{if(w.state==='installed'&&navigator.serviceWorker.controller)offerWorker(w);});});checkVersion();}).catch(()=>versionMsg('V9.1｜離線快取未啟用，請使用 HTTPS 網站'));window.addEventListener('focus',()=>checkVersion());document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkVersion();applyWaiting();}});setInterval(()=>checkVersion(),900000);setInterval(applyWaiting,1500);}else versionMsg('V9.1｜目前環境不支援自動更新');
+if('serviceWorker' in navigator&&window.isSecureContext){let hadController=!!navigator.serviceWorker.controller;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(hadController||updating){save();location.reload();}else{hadController=true;versionMsg('V9.2｜離線程式已啟用');}});navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(r=>{reg=r;if(r.waiting&&navigator.serviceWorker.controller)offerWorker(r.waiting);r.addEventListener('updatefound',()=>{const w=r.installing;if(w)w.addEventListener('statechange',()=>{if(w.state==='installed'&&navigator.serviceWorker.controller)offerWorker(w);});});checkVersion();}).catch(()=>versionMsg('V9.2｜離線快取未啟用，請使用 HTTPS 網站'));setInterval(()=>checkVersion(),900000);setInterval(applyWaiting,1500);}else versionMsg('V9.2｜目前環境不支援自動更新');
+
+window.addEventListener('focus', () => {
+  refreshDate();
+  checkVersion();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  refreshDate();
+  checkVersion();
+  applyWaiting();
+});
