@@ -1,6 +1,14 @@
 <!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'none'; img-src 'self' data:; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"><meta name="referrer" content="no-referrer"><link rel="manifest" href="./manifest.webmanifest"><link rel="apple-touch-icon" href="./icon-192.png"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content"><meta name="theme-color" content="#153c33"><meta name="apple-mobile-web-app-capable" content="yes"><title>每日派車管理 V9.2</title><link rel="stylesheet" href="./ui.css"></head>
 <body>
 <main>
+  <aside id="storageBanner" class="storage-banner" aria-label="本機資料警告" hidden>
+    <p id="storageMessage" role="alert"></p>
+    <div class="row">
+      <button id="reloadStorage" type="button" hidden>重新載入</button>
+      <button id="downloadRaw" type="button" hidden>下載原始資料</button>
+      <button id="recoverStorage" type="button" hidden>匯入備份</button>
+    </div>
+  </aside>
   <header class="masthead"><div class="row between"><h1>每日派車</h1><span class="edition">個人版 <strong>V9.2</strong></span></div></header>
   <section class="date-panel" aria-label="作業日期">
     <div class="row between"><strong id="date"></strong><span id="dateHint" class="badge"></span></div>
@@ -71,6 +79,6 @@
   <button type="button" data-view="records"><span aria-hidden="true">◷</span>紀錄</button>
   <button type="button" data-view="settings"><span aria-hidden="true">⚙︎</span>設定</button>
 </nav>
-<dialog id="editor" aria-labelledby="editTitle"><form id="editForm"><div class="row between"><h2 id="editTitle">修改派車</h2><button type="button" id="closeEditor">取消</button></div><label for="eUnit">排組</label><input id="eUnit" required list="unitOptions"><datalist id="unitOptions"></datalist><label for="eId">車號</label><input id="eId" required placeholder="軍1-00000"><label for="eStatus">派遣狀態</label><select id="eStatus"></select><label for="eCaptain">車長</label><input id="eCaptain"><label for="eDriver">駕駛</label><input id="eDriver"><label for="eTaskChoice">任務（可快速選擇）</label><select id="eTaskChoice"><option value="">無指定任務</option><option>營外加油</option><option>營外裝備載運</option><option>救護待命</option><option>彈藥載運</option><option>人員載運</option><option value="custom">自訂任務</option></select><input id="eTaskCustom" placeholder="輸入自訂任務" hidden><label for="eTask">備註（獨立欄位）</label><textarea id="eTask" placeholder="輸入其他備註或異動原因"></textarea><label><input id="eFixed" type="checkbox"> 同步更新固定名單（隔日仍保留）</label><p class="muted">未勾選時僅影響所選日期；其他日期不能修改固定名單。異動後需重新確認。</p><div class="row"><button type="button" id="restoreCar">恢復固定編組</button><button type="button" id="deleteCar" class="danger">刪除車輛</button></div><footer><p id="editorMessage" role="status"></p><button class="primary" type="submit">儲存異動</button></footer></form></dialog><div id="toast" role="status" hidden></div>
+<dialog id="editor" aria-labelledby="editTitle"><form id="editForm"><div class="row between"><h2 id="editTitle">修改派車</h2><button type="button" id="closeEditor">取消</button></div><label for="eUnit">排組</label><input id="eUnit" required list="unitOptions"><datalist id="unitOptions"></datalist><label for="eId">車號</label><input id="eId" required placeholder="軍1-00000"><label for="eStatus">派遣狀態</label><select id="eStatus"></select><label for="eCaptain">車長</label><input id="eCaptain"><label for="eDriver">駕駛</label><input id="eDriver"><label for="eTaskChoice">任務（可快速選擇）</label><select id="eTaskChoice"><option value="">無指定任務</option><option>營外加油</option><option>營外裝備載運</option><option>救護待命</option><option>彈藥載運</option><option>人員載運</option><option value="custom">自訂任務</option></select><input id="eTaskCustom" placeholder="輸入自訂任務" hidden><label for="eTask">備註（獨立欄位）</label><textarea id="eTask" placeholder="輸入其他備註或異動原因"></textarea><label><input id="eFixed" type="checkbox"> 同步更新固定名單（隔日仍保留）</label><p class="muted">未勾選時僅影響所選日期；其他日期不能修改固定名單。異動後需重新確認。</p><div class="row"><button type="button" id="restoreCar">恢復固定編組</button><button type="button" id="deleteCar" class="danger">刪除車輛</button></div><footer><p id="editorStorage" class="storage-banner" role="alert" hidden></p><p id="editorMessage" role="status"></p><button class="primary" type="submit">儲存異動</button></footer></form></dialog><div id="toast" role="status" hidden></div>
 <script src="./app.js" defer></script>
 </body></html>
