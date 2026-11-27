@@ -51,6 +51,7 @@ class AppServer(ThreadingHTTPServer):
     def __init__(self):
         super().__init__(('127.0.0.1', 0), AppHandler)
         self.directory = ROOT
+        self.reachable = True
         self.url = f'http://127.0.0.1:{self.server_port}/dispatch-manager/'
 
 
@@ -60,6 +61,12 @@ class AppHandler(SimpleHTTPRequestHandler):
 
     def translate_path(self, path):
         return super().translate_path(path.removeprefix('/dispatch-manager'))
+
+    def do_GET(self):
+        if not self.server.reachable:
+            self.close_connection = True
+            return
+        super().do_GET()
 
     def send_head(self):
         # Both revisions share one URL. Directory timestamps do not represent deploy order.
@@ -175,3 +182,4 @@ class BrowserCase(unittest.TestCase):
         finally:
             context.close()
             self.server.directory = ROOT
+            self.server.reachable = True

@@ -204,7 +204,8 @@ class BrowserRegression(BrowserCase):
                 self.assertEqual(get_download(page, '#backup'), backup)
                 page.locator('#checkVersion').click()
                 expect(page.locator('#versionStatus')).to_contain_text('已檢查更新')
-                context.set_offline(True)
+                # Disconnect the origin itself so the cached navigation is tested in both engines.
+                self.server.reachable = False
                 page.close()
                 page = context.new_page()
                 page.goto(self.server.url)
