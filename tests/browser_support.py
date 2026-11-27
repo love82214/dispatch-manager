@@ -47,6 +47,16 @@ ROSTER = """虛構甲組
 軍T-00000 待命"""
 
 
+DENY_WRITES = """
+window.rejectWrites = true;
+const put = Storage.prototype.setItem;
+Storage.prototype.setItem = function(k, v) {
+  if (k === key && window.rejectWrites) throw new DOMException('Synthetic limit', 'QuotaExceededError');
+  return put.call(this, k, v);
+};
+"""
+
+
 class AppServer(ThreadingHTTPServer):
     def __init__(self):
         super().__init__(('127.0.0.1', 0), AppHandler)
@@ -88,6 +98,24 @@ def wait_for(predicate, message, timeout=18):
             return
         sleep(.15)
     raise AssertionError(message)
+
+
+@contextmanager
+def hold_write_lock(page):
+    page.evaluate('''key => {
+      navigator.locks.request(key, () => new Promise(resolve => { window.releaseTest = resolve; }));
+    }''', KEY)
+    page.wait_for_function('() => typeof window.releaseTest === "function"')
+    try:
+        yield
+    finally:
+        page.evaluate('window.releaseTest()')
+
+
+def wait_for_writes(page, count):
+    wait_for(lambda: page.evaluate('''async key => (await navigator.locks.query()).pending
+      .filter(lock => lock.name === key).length''', KEY) == count,
+             f'Expected {count} queued dispatch writes')
 
 
 def navigate(page, view):
