@@ -1,0 +1,6 @@
+const CACHE='dispatch-static-v9.0';
+const ASSETS=['./index.html','./app.js','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
+self.addEventListener('install',e=>e.waitUntil((async()=>{const c=await caches.open(CACHE);try{await c.addAll(ASSETS.map(x=>new Request(x,{cache:'reload',credentials:'same-origin'})));}catch(err){await caches.delete(CACHE);throw err;}})()));
+self.addEventListener('message',e=>{if(e.data?.type==='ACTIVATE')self.skipWaiting();});
+self.addEventListener('activate',e=>e.waitUntil((async()=>{await self.clients.claim();for(const k of await caches.keys())if(k.startsWith('dispatch-static-')&&k!==CACHE)await caches.delete(k);})()));
+self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==self.location.origin)return;const allowed=ASSETS.map(x=>new URL(x,self.registration.scope).href);if(e.request.mode==='navigate'&&[self.registration.scope,new URL('./index.html',self.registration.scope).href].includes(u.href)){e.respondWith(caches.open(CACHE).then(c=>c.match(new URL('./index.html',self.registration.scope).href)).then(r=>r||fetch(e.request)));}else if(allowed.includes(u.href)){e.respondWith(caches.open(CACHE).then(c=>c.match(e.request)).then(r=>r||fetch(e.request)));}});
