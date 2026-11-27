@@ -1,4 +1,4 @@
-const CACHE='dispatch-static-v9.0';
+const CACHE='dispatch-static-v9.1';
 const ASSETS=['./index.html','./app.js','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',e=>e.waitUntil((async()=>{const c=await caches.open(CACHE);try{await c.addAll(ASSETS.map(x=>new Request(x,{cache:'reload',credentials:'same-origin'})));}catch(err){await caches.delete(CACHE);throw err;}})()));
 self.addEventListener('message',e=>{if(e.data?.type==='ACTIVATE')self.skipWaiting();});
